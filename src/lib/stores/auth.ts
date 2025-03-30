@@ -1,38 +1,40 @@
+// src/lib/stores/auth.ts
 import { writable } from 'svelte/store';
+import { supabase } from '$lib/supabase/client';
+import { browser } from '$app/environment';
 
-// Create a mock user object
-const mockUser = {
-  id: 'mock-user-id',
-  email: 'admin@example.com',
-  user_metadata: {
-    full_name: 'Admin User'
-  },
-  role: 'instructor'
-};
-
-// Create stores with initial values
+// Create the user store
 export const user = writable(null);
-export const isAuthenticated = writable(false);
 
-// Simple login function
-export const login = () => {
-  user.set(mockUser);
-  isAuthenticated.set(true);
-  localStorage.setItem('isAuthenticated', 'true');
-};
-
-// Simple logout function
-export const logout = () => {
-  user.set(null);
-  isAuthenticated.set(false);
-  localStorage.removeItem('isAuthenticated');
-};
-
-// Initialize auth state from localStorage
-export const initAuth = () => {
-  const auth = localStorage.getItem('isAuthenticated');
-  if (auth === 'true') {
-    user.set(mockUser);
-    isAuthenticated.set(true);
+// Initialize auth and set up listeners
+export async function initAuth() {
+  console.log("Initializing auth");
+  
+  if (!browser) return; // Skip on server
+  
+  // Get current session
+  const { data, error } = await supabase.auth.getSession();
+  
+  if (error) {
+    console.error("Auth session error:", error);
+    return;
   }
-};
+  
+  // Set user if session exists
+  if (data.session) {
+    console.log("Found existing session:", data.session);
+    user.set(data.session.user);
+  } else {
+    console.log("No active session found");
+  }
+  
+  // Listen for auth changes
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    console.log("Auth state changed:", event);
+    user.set(session?.user || null);
+  });
+  
+  return () => {
+    subscription.unsubscribe();
+  };
+}

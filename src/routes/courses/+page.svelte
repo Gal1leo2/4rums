@@ -8,7 +8,6 @@
     import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '$lib/components/ui/card';
     import { Badge } from '$lib/components/ui/badge';
     import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
-    // import { Loader2, Search, BookOpen, Clock, Users } from 'lucide-svelte';
   
     let courses: any[] = [];
     let activeCourses: any[] = [];
@@ -16,34 +15,38 @@
     let loading = true;
     let searchQuery = '';
     let filteredCourses: any[] = [];
+    let authInitialized = false;
     
-    onMount(async () => {
-      // Check if user is authenticated
+    // Wait for auth to be initialized
+    $: if ($user !== null) {
+      authInitialized = true;
+    }
+    
+    // Only run this when auth is initialized
+    $: if (authInitialized) {
+      loadCourses();
+    }
+    
+    async function loadCourses() {
       if (!$user) {
         loading = false;
         return;
       }
       
-      // Load user's courses
+      console.log("Loading courses for user:", $user.id);
+      
+      // Modified query without the nested subqueries
       const { data, error } = await supabase
         .from('course_members')
         .select(`
           role,
-          courses (
+          courses:course_id (
             id,
             code,
             name,
             term,
             is_active,
-            description,
-            (
-              select count(*) from course_members cm
-              where cm.course_id = courses.id
-            ) as member_count,
-            (
-              select count(*) from posts
-              where course_id = courses.id
-            ) as post_count
+            description
           )
         `)
         .eq('user_id', $user.id);
@@ -55,18 +58,58 @@
         
         // Separate active and archived courses
         activeCourses = courses
-          .filter(c => c.courses.is_active)
-          .map(c => ({ ...c.courses, role: c.role }));
+          .filter(c => c.courses?.is_active)
+          .map(c => ({ 
+            ...c.courses, 
+            role: c.role,
+            member_count: 0, 
+            post_count: 0  
+          }));
           
         archivedCourses = courses
-          .filter(c => !c.courses.is_active)
-          .map(c => ({ ...c.courses, role: c.role }));
+          .filter(c => c.courses && !c.courses.is_active)
+          .map(c => ({ 
+            ...c.courses, 
+            role: c.role,
+            member_count: 0,
+            post_count: 0
+          }));
           
         filteredCourses = [...activeCourses];
+        
+        // Fetch member and post counts for each course
+        if (courses.length > 0) {
+          await Promise.all(
+            [...activeCourses, ...archivedCourses].map(async (course) => {
+              // Get member count
+              const { count: memberCount, error: memberError } = await supabase
+                .from('course_members')
+                .select('*', { count: 'exact', head: true })
+                .eq('course_id', course.id);
+                
+              if (!memberError) {
+                course.member_count = memberCount || 0;
+              }
+                
+              // Get post count  
+              const { count: postCount, error: postError } = await supabase
+                .from('posts')
+                .select('*', { count: 'exact', head: true })
+                .eq('course_id', course.id);
+                
+              if (!postError) {
+                course.post_count = postCount || 0;
+              }
+            })
+          );
+          
+          // Update filtered courses with the new data
+          filteredCourses = [...activeCourses];
+        }
       }
       
       loading = false;
-    });
+    }
     
     function filterCourses(query: string, courseList: any[]) {
       if (!query.trim()) return courseList;
@@ -96,10 +139,9 @@
       
       <!-- Search Box -->
       <div class="relative w-full max-w-sm">
-        <!-- <Search class="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" /> -->
         <Input
           placeholder="Search courses..."
-          class="pl-10"
+          class="pl-3"
           bind:value={searchQuery}
         />
       </div>
@@ -107,7 +149,7 @@
     
     {#if loading}
       <div class="flex justify-center py-12">
-        <!-- <Loader2 class="h-8 w-8 animate-spin" /> -->
+        <p>Loading...</p>
       </div>
     {:else if !$user}
       <Card>
@@ -156,17 +198,14 @@
                     
                     <div class="flex flex-col space-y-2">
                       <div class="flex items-center gap-2 text-sm">
-                        <!-- <Clock class="h-4 w-4 text-muted-foreground" /> -->
                         <span>{course.term}</span>
                       </div>
                       
                       <div class="flex items-center gap-2 text-sm">
-                        <!-- <Users class="h-4 w-4 text-muted-foreground" /> -->
                         <span>{course.member_count} {course.member_count === 1 ? 'member' : 'members'}</span>
                       </div>
                       
                       <div class="flex items-center gap-2 text-sm">
-                        <!-- <BookOpen class="h-4 w-4 text-muted-foreground" /> -->
                         <span>{course.post_count} {course.post_count === 1 ? 'post' : 'posts'}</span>
                       </div>
                     </div>
@@ -213,17 +252,14 @@
                     
                     <div class="flex flex-col space-y-2">
                       <div class="flex items-center gap-2 text-sm">
-                        <!-- <Clock class="h-4 w-4 text-muted-foreground" /> -->
                         <span>{course.term}</span>
                       </div>
                       
                       <div class="flex items-center gap-2 text-sm">
-                        <!-- <Users class="h-4 w-4 text-muted-foreground" /> -->
                         <span>{course.member_count} {course.member_count === 1 ? 'member' : 'members'}</span>
                       </div>
                       
                       <div class="flex items-center gap-2 text-sm">
-                        <!-- <BookOpen class="h-4 w-4 text-muted-foreground" /> -->
                         <span>{course.post_count} {course.post_count === 1 ? 'post' : 'posts'}</span>
                       </div>
                     </div>
