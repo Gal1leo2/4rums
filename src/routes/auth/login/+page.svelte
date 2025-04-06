@@ -44,9 +44,10 @@
   }
 
   async function signInWithGoogle() {
-    googleLoading = true;
-    error = '';
-    
+  googleLoading = true;
+  error = '';
+  
+  try {
     const { data, error: err } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -58,8 +59,12 @@
       error = err.message;
       googleLoading = false;
     }
-    // No need to redirect manually as Supabase will handle the redirect
+  } catch (e) {
+    console.error('Exception during sign in:', e);
+    error = 'An unexpected error occurred';
+    googleLoading = false;
   }
+}
 
   function togglePasswordVisibility() {
     showPassword = !showPassword;
@@ -94,11 +99,12 @@
     
     <!-- Google Sign In Button - Put it at the top for prominence -->
     <Button 
-      variant="outline" 
-      class="w-full mb-4 flex items-center justify-center gap-2" 
-      on:click={signInWithGoogle}
-      disabled={googleLoading}
-    >
+    variant="outline" 
+    class="w-full mb-4 flex items-center justify-center gap-2" 
+    onclick={signInWithGoogle}
+    disabled={googleLoading}
+  >
+    <!-- Button content -->
       {#if googleLoading}
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4 animate-spin">
           <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>

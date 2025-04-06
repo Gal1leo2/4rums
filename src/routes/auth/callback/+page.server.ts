@@ -7,8 +7,7 @@ export const load: PageServerLoad = async ({ url, locals }) => {
   const redirectTo = url.searchParams.get('redirectTo') || '/courses';
   
   if (code) {
-    // The rest of the OAuth flow is handled on the client
-    // This page just ensures we pass along the redirectTo parameter
+    // Pass the redirectTo parameter to the client
     return { redirectTo };
   }
   
