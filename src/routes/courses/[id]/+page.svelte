@@ -3,7 +3,7 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase/client';
-  import { user } from '$lib/stores/authSync';
+  import { user } from '$lib/stores/Sync';
   import { Button } from '$lib/components/ui/button';
   import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
   import { Input } from '$lib/components/ui/input';
