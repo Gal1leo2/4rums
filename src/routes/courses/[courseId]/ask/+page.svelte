@@ -4,7 +4,7 @@
     import { goto } from '$app/navigation';
     import { onMount } from 'svelte';
     import { supabase } from '$lib/supabase/client';
-    import { user } from '$lib/stores/auth';
+    import { user } from '$lib/stores/authSync';
     import { Button } from '$lib/components/ui/button';
     import { Input } from '$lib/components/ui/input';
     import { Textarea } from '$lib/components/ui/textarea';

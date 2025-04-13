@@ -3,7 +3,7 @@
 	let { children } = $props();
 
 	import { onMount } from 'svelte';
-	import { initAuth, user } from '$lib/stores/auth';
+	import { initAuth, user } from '$lib/stores/authSync';
 
 	onMount(() => {
      initAuth();
