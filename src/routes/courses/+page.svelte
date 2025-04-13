@@ -2,75 +2,136 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase/client';
-  import { user } from '$lib/stores/authSync';
   import { Card, CardContent } from '$lib/components/ui/card';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
   import { Separator } from '$lib/components/ui/separator';
+  import { Alert, AlertDescription } from '$lib/components/ui/alert';
 
   let activeCourses = [];
   let inactiveCourses = [];
   let loading = true;
+  let currentUser = null;
+  let debugInfo = {
+    rawData: null,
+    validEntries: null,
+    error: null
+  };
   
   onMount(async () => {
-    // Check if user is authenticated
-    if (!$user) {
+    console.log("Courses page mounted");
+    
+    // Direct check for auth session - don't rely on the store
+    const { data } = await supabase.auth.getSession();
+    
+    if (data.session) {
+      console.log("Session found directly:", data.session.user.id);
+      currentUser = data.session.user;
+      loadCourses(data.session.user.id);
+    } else {
+      console.log("No session found directly");
       loading = false;
-      return;
     }
-    
-    // Load all course data from your API
-    const { data, error } = await supabase
-      .from('course_members')
-      .select(`
-        role,
-        courses:course_id (
-          id, 
-          code, 
-          name,
-          term,
-          description,
-          is_active
-        )
-      `)
-      .eq('user_id', $user.id);
-      
-    if (error) {
-      console.error('Error loading courses:', error);
-      loading = false;
-      return;
-    }
-    
-    console.log('Raw course data:', data);
-    
-    // Separate active and inactive courses based on the 'is_active' field
-    activeCourses = data
-      .filter(item => item.courses && item.courses.is_active === true)
-      .map(item => ({
-        id: item.courses.id,
-        code: item.courses.code,
-        name: item.courses.name,
-        term: item.courses.term,
-        description: item.courses.description,
-        role: item.role
-      }));
-      
-    inactiveCourses = data
-      .filter(item => item.courses && item.courses.is_active === false)
-      .map(item => ({
-        id: item.courses.id,
-        code: item.courses.code,
-        name: item.courses.name,
-        term: item.courses.term,
-        description: item.courses.description,
-        role: item.role
-      }));
-    
-    console.log('Active courses:', activeCourses);
-    console.log('Inactive courses:', inactiveCourses);
-    
-    loading = false;
   });
+  
+  async function loadCourses(userId) {
+    console.log("Loading courses for user:", userId);
+    
+    try {
+      // First, let's check if the user has any course memberships
+      const { data: membershipCheck, error: membershipError } = await supabase
+        .from('course_members')
+        .select('course_id')
+        .eq('user_id', userId);
+        
+      if (membershipError) {
+        console.error('Error checking memberships:', membershipError);
+        debugInfo.error = membershipError;
+        loading = false;
+        return;
+      }
+      
+      console.log('Membership check:', membershipCheck);
+      
+      if (!membershipCheck || membershipCheck.length === 0) {
+        console.log('No course memberships found for user');
+        debugInfo.error = { message: 'No course memberships found for user' };
+        loading = false;
+        return;
+      }
+      
+      // Now load the full course data
+      const { data, error } = await supabase
+        .from('course_members')
+        .select(`
+          role,
+          courses:course_id (
+            id, 
+            code, 
+            name,
+            term,
+            description,
+            is_active
+          )
+        `)
+        .eq('user_id', userId);
+        
+      if (error) {
+        console.error('Error loading courses:', error);
+        debugInfo.error = error;
+        loading = false;
+        return;
+      }
+      
+      console.log('Raw course data:', data);
+      debugInfo.rawData = data;
+      
+      // Process the data - handle empty results correctly
+      const validEntries = data ? data.filter(item => item && item.courses) : [];
+      debugInfo.validEntries = validEntries;
+      
+      console.log('Valid entries:', validEntries);
+      
+      // Check if we have any valid entries
+      if (validEntries.length === 0) {
+        console.log('No valid course entries found');
+        debugInfo.error = { message: 'No valid course entries found - courses might be missing' };
+        loading = false;
+        return;
+      }
+      
+      // Separate active and inactive courses
+      activeCourses = validEntries
+        .filter(item => item.courses.is_active === true)
+        .map(item => ({
+          id: item.courses.id,
+          code: item.courses.code,
+          name: item.courses.name,
+          term: item.courses.term,
+          description: item.courses.description,
+          role: item.role
+        }));
+        
+      inactiveCourses = validEntries
+        .filter(item => item.courses.is_active === false)
+        .map(item => ({
+          id: item.courses.id,
+          code: item.courses.code,
+          name: item.courses.name,
+          term: item.courses.term,
+          description: item.courses.description,
+          role: item.role
+        }));
+      
+      console.log('Active courses:', activeCourses);
+      console.log('Inactive courses:', inactiveCourses);
+    } catch (err) {
+      console.error("Error in loadCourses:", err);
+      debugInfo.error = err;
+    } finally {
+      loading = false;
+    }
+  }
   
   // Helper function to determine term icon
   function getTermIcon(term) {
@@ -121,7 +182,7 @@
       <div class="flex justify-center py-12">
           <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
       </div>
-  {:else if !$user}
+  {:else if !currentUser}
       <Card class="border-2 border-dashed">
         <CardContent class="flex flex-col items-center py-16">
           <div class="rounded-full bg-muted p-6 mb-6">
@@ -138,6 +199,40 @@
             You need to be logged in to see the courses you're enrolled in.
           </p>
           <Button href="/auth/login?redirect=/courses" size="lg" class="px-8">Sign In</Button>
+        </CardContent>
+      </Card>
+  {:else if debugInfo.error}
+      <Alert variant="destructive" class="mb-6">
+        <AlertDescription>
+          <p><strong>Error loading courses:</strong> {debugInfo.error.message || 'Unknown error'}</p>
+        </AlertDescription>
+      </Alert>
+      
+      <!-- Debug Information -->
+      <Card class="mt-6">
+        <CardContent class="pt-6">
+          <h3 class="text-lg font-semibold mb-3">Debug Information</h3>
+          
+          <div class="space-y-4 text-sm">
+            <div>
+              <p class="font-medium">User ID:</p>
+              <pre class="bg-muted p-2 rounded-md mt-1 overflow-auto">{currentUser.id}</pre>
+            </div>
+            
+            <div>
+              <p class="font-medium">Raw Course Data:</p>
+              <pre class="bg-muted p-2 rounded-md mt-1 overflow-auto">{JSON.stringify(debugInfo.rawData, null, 2)}</pre>
+            </div>
+            
+            <div>
+              <p class="font-medium">Valid Entries:</p>
+              <pre class="bg-muted p-2 rounded-md mt-1 overflow-auto">{JSON.stringify(debugInfo.validEntries, null, 2)}</pre>
+            </div>
+            
+            <div class="mt-4">
+              <Button href="/debug" variant="outline">Go to Debug Page</Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
   {:else}
@@ -157,6 +252,10 @@
                 </svg>
                 <h3 class="text-xl font-medium mb-2">You are not enrolled in any active courses</h3>
                 <p class="text-muted-foreground">Contact your administrator to join courses</p>
+                
+                <div class="mt-6">
+                  <Button href="/debug" variant="outline">Go to Debug Page</Button>
+                </div>
               </div>
             </div>
           {:else}
