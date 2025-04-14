@@ -40,39 +40,7 @@
     </div>
     
     <!-- Features Section -->
-    {#if showFeatures}
-      <div class="mt-16 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto" in:fade={{ duration: 800, delay: 200 }}>
-        <div class="flex flex-col items-center text-center p-8 bg-gray-50 rounded-xl shadow-sm hover:shadow-md transition-shadow" in:fly={{ y: 20, duration: 600, delay: 300 }}>
-          <div class="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-6">
-            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><path d="M9.9 19.7 3.7 13.5c-1-1-1-2.6 0-3.5l6.2-6.2c1-1 2.6-1 3.5 0l6.2 6.2c1 1 1 2.6 0 3.5l-6.2 6.2c-1 1-2.5 1-3.5 0Z"/><path d="M9.9 5.9 14.1 10"/><path d="M9.9 18.1 14.1 14"/></svg>
-          </div>
-          <h2 class="text-2xl font-semibold mb-3">Ask Anonymously</h2>
-          <p class="text-gray-600 mb-6">
-            Feel free to ask questions without revealing your identity. No judgment, just knowledge sharing.
-          </p>
-        </div>
-        
-        <div class="flex flex-col items-center text-center p-8 bg-gray-50 rounded-xl shadow-sm hover:shadow-md transition-shadow" in:fly={{ y: 20, duration: 600, delay: 400 }}>
-          <div class="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-6">
-            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-          </div>
-          <h2 class="text-2xl font-semibold mb-3">Fast Responses</h2>
-          <p class="text-gray-600 mb-6">
-            Connect directly with instructors and peers to solve problems and clarify concepts quickly.
-          </p>
-        </div>
-        
-        <div class="flex flex-col items-center text-center p-8 bg-gray-50 rounded-xl shadow-sm hover:shadow-md transition-shadow" in:fly={{ y: 20, duration: 600, delay: 500 }}>
-          <div class="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-6">
-            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-primary"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>
-          </div>
-          <h2 class="text-2xl font-semibold mb-3">Verified Answers</h2>
-          <p class="text-gray-600 mb-6">
-            Easily identify instructor-endorsed solutions with verification badges to ensure accurate information.
-          </p>
-        </div>
-      </div>
-    {/if}
+    
     
     <!-- CTA Section -->
 
