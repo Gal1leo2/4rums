@@ -9,7 +9,6 @@
   import { Input } from '$lib/components/ui/input';
   import { Textarea } from '$lib/components/ui/textarea';
   import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '$lib/components/ui/card';
-  import { Select, SelectContent, SelectItem, SelectTrigger } from '$lib/components/ui/select';
   import { Label } from '$lib/components/ui/label';
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert';
@@ -23,13 +22,14 @@
   let isPrivate = false;
   let isAnonymous = false;
   let selectedFolder = '';
-  let tags: string[] = [];
+  let tags = [];
   let newTag = '';
-  let course: any = null;
-  let folders: any[] = [];
+  let course = null;
+  let folders = [];
   let loading = true;
   let submitting = false;
   let error = '';
+  let userRole = '';
   
   onMount(async () => {
     // Check if user is authenticated
@@ -63,7 +63,25 @@
       console.error('Error loading folders:', folderError);
     } else {
       folders = folderData || [];
-      console.log('Loaded folders:', folders);
+    }
+    
+    // Get user's role in this course
+    if ($user) {
+      const { data: memberData } = await supabase
+        .from('course_members')
+        .select('role')
+        .eq('course_id', courseId)
+        .eq('user_id', $user.id)
+        .single();
+        
+      if (memberData) {
+        userRole = memberData.role;
+        
+        // Set isAnonymous default based on role
+        if (userRole === 'student') {
+          isAnonymous = true;
+        }
+      }
     }
     
     loading = false;
@@ -76,7 +94,7 @@
     }
   }
   
-  function removeTag(tag: string) {
+  function removeTag(tag) {
     tags = tags.filter(t => t !== tag);
   }
   
@@ -89,40 +107,12 @@
     submitting = true;
     error = '';
     
-    // Validate post type to ensure it matches allowed values
-    if (!['question', 'announcement', 'note'].includes(postType)) {
-      error = 'Invalid post type selected';
-      submitting = false;
-      return;
-    }
-    
-    // Get user's role in this course
-    const { data: memberData } = await supabase
-      .from('course_members')
-      .select('role')
-      .eq('course_id', courseId)
-      .eq('user_id', $user.id)
-      .single();
-      
     // Only instructors and TAs can create announcements
-    if (postType === 'announcement' && (!memberData || (memberData.role !== 'instructor' && memberData.role !== 'ta'))) {
+    if (postType === 'announcement' && userRole !== 'instructor' && userRole !== 'ta') {
       error = 'Only instructors and TAs can create announcements';
       submitting = false;
       return;
     }
-    
-    // Log the data being sent to help with debugging
-    console.log('Submitting post with data:', {
-      course_id: courseId,
-      user_id: $user.id,
-      title,
-      content,
-      post_type: postType,
-      is_private: isPrivate,
-      anonymous: isAnonymous,
-      folder_id: selectedFolder || null,
-      tags
-    });
     
     const { data, error: postError } = await supabase
       .from('posts')
@@ -153,8 +143,8 @@
 
 <div class="container mx-auto py-8 max-w-3xl">
   {#if loading}
-    <div class="flex justify-center">
-      <p>Loading...</p>
+    <div class="flex justify-center py-12">
+      <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
     </div>
   {:else if course}
     <!-- Breadcrumb -->
@@ -183,19 +173,17 @@
         <form id="post-form" class="space-y-4" on:submit|preventDefault={submitPost}>
           <div class="space-y-2">
             <Label for="post-type">Post Type</Label>
-            <Select bind:value={postType}>
-              <SelectTrigger placeholder="Select post type">
-                {postType === 'question' ? 'Question' : 
-                 postType === 'note' ? 'Note' : 
-                 postType === 'announcement' ? 'Announcement' : 
-                 'Select post type'}
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="question">Question</SelectItem>
-                <SelectItem value="note">Note</SelectItem>
-                <SelectItem value="announcement">Announcement</SelectItem>
-              </SelectContent>
-            </Select>
+            <div class="relative">
+              <select 
+                id="post-type"
+                bind:value={postType}
+                class="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="question">Question</option>
+                <option value="note">Note</option>
+                <option value="announcement">Announcement</option>
+              </select>
+            </div>
           </div>
           
           <div class="space-y-2">
@@ -215,17 +203,18 @@
           
           <div class="space-y-2">
             <Label for="folder">Folder (Optional)</Label>
-            <Select bind:value={selectedFolder}>
-              <SelectTrigger placeholder="Select a folder">
-                {selectedFolder ? folders.find(f => f.id === selectedFolder)?.name || 'Select a folder' : 'None'}
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">None</SelectItem>
+            <div class="relative">
+              <select 
+                id="folder"
+                bind:value={selectedFolder}
+                class="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="">None</option>
                 {#each folders as folder}
-                  <SelectItem value={folder.id}>{folder.name}</SelectItem>
+                  <option value={folder.id}>{folder.name}</option>
                 {/each}
-              </SelectContent>
-            </Select>
+              </select>
+            </div>
           </div>
           
           <div class="space-y-2">
@@ -268,9 +257,9 @@
       </CardContent>
       
       <CardFooter class="flex justify-end gap-2">
-        <Button variant="outline" type="button" on:click={() => goto(`/courses/${courseId}`)}>
+        <a href="/courses/{courseId}" class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2">
           Cancel
-        </Button>
+        </a>
         <Button type="submit" form="post-form" disabled={submitting}>
           {submitting ? 'Creating...' : 'Create Post'}
         </Button>
