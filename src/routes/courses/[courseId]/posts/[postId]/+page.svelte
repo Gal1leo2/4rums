@@ -12,135 +12,204 @@
   import { Badge } from '$lib/components/ui/badge';
   import { Checkbox } from '$lib/components/ui/checkbox';
   
+  // Define TypeScript interfaces for our data structures
+  interface UserData {
+    id: string;
+    full_name: string;
+    role?: string;
+  }
+  
+  interface CourseData {
+    id: string;
+    code: string;
+    name: string;
+  }
+  
+  interface CommentData {
+    id: string;
+    response_id: string;
+    user_id: string;
+    content: string;
+    anonymous: boolean;
+    created_at: string;
+    users?: UserData;
+  }
+  
+  interface ResponseData {
+    id: string;
+    post_id: string;
+    user_id: string;
+    content: string;
+    anonymous: boolean;
+    is_endorsed: boolean;
+    response_type: string;
+    created_at: string;
+    updated_at: string;
+    user?: UserData;
+    upvote_count: number;
+    comments?: CommentData[];
+  }
+  
+  interface PostData {
+    id: string;
+    course_id: string;
+    user_id: string;
+    title: string;
+    content: string;
+    post_type: string;
+    status: string;
+    anonymous: boolean;
+    is_private: boolean;
+    created_at: string;
+    updated_at: string;
+    user?: UserData;
+    courses?: CourseData;
+  }
+  
   const { courseId, postId } = $page.params;
   
-  let post = null;
-  let responses = [];
-  let newResponse = '';
-  let isAnonymous = false;
-  let loading = true;
-  let submitting = false;
-  let currentUserRole = '';
+  let post: PostData | null = null;
+  let responses: ResponseData[] = [];
+  let newResponse: string = '';
+  let isAnonymous: boolean = false;
+  let loading: boolean = true;
+  let submitting: boolean = false;
+  let currentUserRole: string = '';
   
   onMount(async () => {
-    // Load post data
-    const { data: postData, error: postError } = await supabase
-      .from('posts')
-      .select('*, courses(code, name)')
-      .eq('id', postId)
-      .single();
+    onMount(async () => {  // Add the 'async' keyword here
+  if (!$user) {
+    const { data } = await supabase.auth.getSession();
       
-    if (postError) {
-      console.error('Error loading post:', postError);
-      loading = false;
-      return;
+    if (!data.session) {
+      console.log("No authenticated user found, redirecting to login");
+      const currentPath = window.location.pathname;
+      window.location.href = `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
+      return; // Stop further execution
     }
-    
-    // Get post author info
-    if (!postData.anonymous) {
-      const { data: userData } = await supabase
-        .from('users')
-        .select('id, full_name, role')
-        .eq('id', postData.user_id)
+  }
+});
+    try {
+      // Load post data
+      const { data: postData, error: postError } = await supabase
+        .from('posts')
+        .select('*, courses(code, name)')
+        .eq('id', postId)
         .single();
         
-      if (userData) {
-        postData.user = userData;
+      if (postError) {
+        console.error('Error loading post:', postError);
+        loading = false;
+        return;
       }
-    }
-    
-    post = postData;
-    
-    // Load responses
-    const { data: responseData, error: responseError } = await supabase
-      .from('responses')
-      .select('*')
-      .eq('post_id', postId)
-      .order('is_endorsed', { ascending: false })
-      .order('created_at', { ascending: true });
       
-    if (responseError) {
-      console.error('Error loading responses:', responseError);
-    } else if (responseData) {
-      // Enhance each response with user info and reactions
-      const enhancedResponses = await Promise.all(responseData.map(async (response) => {
-        // Get user info if not anonymous
-        if (!response.anonymous) {
-          const { data: userData } = await supabase
-            .from('users')
-            .select('id, full_name, role')
-            .eq('id', response.user_id)
-            .single();
+      // Get post author info
+      if (!postData.anonymous) {
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('id, full_name, role')
+          .eq('id', postData.user_id)
+          .single();
+          
+        if (!userError && userData) {
+          postData.user = userData;
+        }
+      }
+      
+      post = postData as PostData;
+      
+      // Load responses
+      const { data: responseData, error: responseError } = await supabase
+        .from('responses')
+        .select('*')
+        .eq('post_id', postId)
+        .order('is_endorsed', { ascending: false })
+        .order('created_at', { ascending: true });
+        
+      if (responseError) {
+        console.error('Error loading responses:', responseError);
+      } else if (responseData) {
+        // Enhance each response with user info and reactions
+        const enhancedResponses = await Promise.all(responseData.map(async (response) => {
+          // Get user info if not anonymous
+          if (!response.anonymous) {
+            const { data: userData, error: userError } = await supabase
+              .from('users')
+              .select('id, full_name, role')
+              .eq('id', response.user_id)
+              .single();
+              
+            if (!userError && userData) {
+              response.user = userData;
+            }
+          }
+          
+          // Get upvote count
+          const { count: upvoteCount, error: upvoteError } = await supabase
+            .from('reactions')
+            .select('*', { count: 'exact', head: true })
+            .eq('target_type', 'response')
+            .eq('target_id', response.id)
+            .eq('reaction_type', 'upvote');
             
-          if (userData) {
-            response.user = userData;
+          response.upvote_count = upvoteCount || 0;
+          
+          // Get comments
+          const { data: comments, error: commentsError } = await supabase
+            .from('comments')
+            .select('*, users(id, full_name)')
+            .eq('response_id', response.id)
+            .order('created_at', { ascending: true });
+            
+          response.comments = (comments || []) as CommentData[];
+          
+          return response as ResponseData;
+        }));
+        
+        responses = enhancedResponses;
+      }
+      
+      // Get current user's role in this course
+      if ($user) {
+        const { data: memberData, error: memberError } = await supabase
+          .from('course_members')
+          .select('role')
+          .eq('course_id', courseId)
+          .eq('user_id', $user.id)
+          .single();
+          
+        if (!memberError && memberData) {
+          currentUserRole = memberData.role;
+          
+          // Set default anonymous state
+          if (currentUserRole === 'student') {
+            isAnonymous = true;
           }
         }
-        
-        // Get upvote count
-        const { count: upvoteCount } = await supabase
-          .from('reactions')
-          .select('*', { count: 'exact', head: true })
-          .eq('target_type', 'response')
-          .eq('target_id', response.id)
-          .eq('reaction_type', 'upvote');
-          
-        response.upvote_count = upvoteCount || 0;
-        
-        // Get comments
-        const { data: comments } = await supabase
-          .from('comments')
-          .select('*, users(id, full_name)')
-          .eq('response_id', response.id)
-          .order('created_at', { ascending: true });
-          
-        response.comments = comments || [];
-        
-        return response;
-      }));
-      
-      responses = enhancedResponses;
-    }
-    
-    // Get current user's role in this course
-    if ($user) {
-      const { data: memberData } = await supabase
-        .from('course_members')
-        .select('role')
-        .eq('course_id', courseId)
-        .eq('user_id', $user.id)
-        .single();
-        
-      if (memberData) {
-        currentUserRole = memberData.role;
-        
-        // Set default anonymous state
-        if (currentUserRole === 'student') {
-          isAnonymous = true;
-        }
       }
-    }
-    
-    loading = false;
-    
-    // Mark post as viewed
-    if ($user) {
-      await supabase.from('post_views').upsert({
-        post_id: postId,
-        user_id: $user.id,
-        last_viewed_at: new Date().toISOString()
-      }, { onConflict: 'post_id,user_id' });
+      
+      // Mark post as viewed
+      if ($user) {
+        await supabase.from('post_views').upsert({
+          post_id: postId,
+          user_id: $user.id,
+          last_viewed_at: new Date().toISOString()
+        }, { onConflict: 'post_id,user_id' });
+      }
+    } catch (err) {
+      console.error('Error in onMount:', err);
+    } finally {
+      loading = false;
     }
   });
   
-  async function submitResponse() {
-  // Return a promise that resolves when submission is complete
-  return new Promise(async (resolve, reject) => {
+  async function submitResponse(): Promise<void> {
+    if (!newResponse.trim() || !$user) {
+      return;
+    }
+    
     try {
-      if (!newResponse.trim() || !$user) {
-        resolve();
-        return;
-      }
+      submitting = true;
       
       const responseType = currentUserRole === 'student' 
         ? 'student_answer' 
@@ -159,117 +228,155 @@
         
       if (error) {
         console.error('Error submitting response:', error);
-        reject(error);
-      } else if (data) {
+        return;
+      }
+      
+      if (data && data.length > 0) {
         // Add the new response to the list
-        responses = [...responses, {
+        const newResponseData: ResponseData = {
           ...data[0],
-          user: { 
+          user: $user ? { 
             id: $user.id, 
-            full_name: $user.user_metadata?.full_name || 'User', 
+            full_name: $user.full_name || 'User', 
             role: currentUserRole 
-          },
+          } : undefined,
           upvote_count: 0,
           comments: []
-        }];
+        };
+        
+        responses = [...responses, newResponseData];
         
         // Clear the form
         newResponse = '';
         
         // Update post status if this is the first response from an instructor
-        if ((responseType === 'instructor_answer' || currentUserRole === 'ta') && post.status === 'open') {
+        if ((responseType === 'instructor_answer' || currentUserRole === 'ta') && 
+            post && post.status === 'open') {
           const { error: updateError } = await supabase
             .from('posts')
             .update({ status: 'answered' })
             .eq('id', postId);
             
-          if (!updateError) {
+          if (!updateError && post) {
             post = { ...post, status: 'answered' };
           }
         }
-        resolve();
       }
     } catch (err) {
-      console.error('Error in submission:', err);
-      reject(err);
+      console.error('Error in submitResponse:', err);
+    } finally {
+      submitting = false;
     }
-  });
-}
+  }
   
-  async function endorseResponse(responseId) {
-    if (!$user || (currentUserRole !== 'instructor' && currentUserRole !== 'ta')) return;
+  async function endorseResponse(responseId: string): Promise<void> {
+    if (!$user || (currentUserRole !== 'instructor' && currentUserRole !== 'ta')) {
+      return;
+    }
     
-    const targetResponse = responses.find(r => r.id === responseId);
-    if (!targetResponse) return;
-    
-    const newEndorsedState = !targetResponse.is_endorsed;
-    
-    const { error } = await supabase
-      .from('responses')
-      .update({ is_endorsed: newEndorsedState })
-      .eq('id', responseId);
+    try {
+      const targetResponse = responses.find(r => r.id === responseId);
+      if (!targetResponse) {
+        return;
+      }
       
-    if (!error) {
+      const newEndorsedState = !targetResponse.is_endorsed;
+      
+      const { error } = await supabase
+        .from('responses')
+        .update({ is_endorsed: newEndorsedState })
+        .eq('id', responseId);
+        
+      if (error) {
+        console.error('Error endorsing response:', error);
+        return;
+      }
+      
       // Update local state
       responses = responses.map(r => 
         r.id === responseId ? { ...r, is_endorsed: newEndorsedState } : r
       );
       
       // If we're endorsing and post is not answered, update post status
-      if (newEndorsedState && post.status === 'open') {
-        await supabase
+      if (newEndorsedState && post && post.status === 'open') {
+        const { error: updateError } = await supabase
           .from('posts')
           .update({ status: 'answered' })
           .eq('id', postId);
           
-        post = { ...post, status: 'answered' };
+        if (!updateError && post) {
+          post = { ...post, status: 'answered' };
+        }
       }
+    } catch (err) {
+      console.error('Error in endorseResponse:', err);
     }
   }
   
-  async function upvoteResponse(responseId) {
-    if (!$user) return;
+  async function upvoteResponse(responseId: string): Promise<void> {
+    if (!$user) {
+      return;
+    }
     
-    // Check if user already upvoted
-    const { data: existingReaction } = await supabase
-      .from('reactions')
-      .select('id')
-      .eq('user_id', $user.id)
-      .eq('target_type', 'response')
-      .eq('target_id', responseId)
-      .eq('reaction_type', 'upvote')
-      .single();
+    try {
+      // Check if user already upvoted
+      const { data: existingReaction, error: checkError } = await supabase
+        .from('reactions')
+        .select('id')
+        .eq('user_id', $user.id)
+        .eq('target_type', 'response')
+        .eq('target_id', responseId)
+        .eq('reaction_type', 'upvote')
+        .maybeSingle();
+        
+      if (checkError) {
+        console.error('Error checking upvote:', checkError);
+        return;
+      }
       
-    if (existingReaction) {
-      // Remove upvote
-      await supabase
-        .from('reactions')
-        .delete()
-        .eq('id', existingReaction.id);
+      if (existingReaction) {
+        // Remove upvote
+        const { error: deleteError } = await supabase
+          .from('reactions')
+          .delete()
+          .eq('id', existingReaction.id);
+          
+        if (deleteError) {
+          console.error('Error removing upvote:', deleteError);
+          return;
+        }
         
-      // Update local count
-      responses = responses.map(r => 
-        r.id === responseId ? { ...r, upvote_count: Math.max(0, r.upvote_count - 1) } : r
-      );
-    } else {
-      // Add upvote
-      await supabase
-        .from('reactions')
-        .insert({
-          user_id: $user.id,
-          target_type: 'response',
-          target_id: responseId,
-          reaction_type: 'upvote'
-        });
+        // Update local count
+        responses = responses.map(r => 
+          r.id === responseId ? { ...r, upvote_count: Math.max(0, r.upvote_count - 1) } : r
+        );
+      } else {
+        // Add upvote
+        const { error: insertError } = await supabase
+          .from('reactions')
+          .insert({
+            user_id: $user.id,
+            target_type: 'response',
+            target_id: responseId,
+            reaction_type: 'upvote'
+          });
+          
+        if (insertError) {
+          console.error('Error adding upvote:', insertError);
+          return;
+        }
         
-      // Update local count
-      responses = responses.map(r => 
-        r.id === responseId ? { ...r, upvote_count: r.upvote_count + 1 } : r
-      );
+        // Update local count
+        responses = responses.map(r => 
+          r.id === responseId ? { ...r, upvote_count: r.upvote_count + 1 } : r
+        );
+      }
+    } catch (err) {
+      console.error('Error in upvoteResponse:', err);
     }
   }
   
-  function getInitials(name) {
+  function getInitials(name: string | undefined): string {
     if (!name) return 'U';
     return name
       .split(' ')
@@ -304,7 +411,7 @@
             </Badge>
             <CardTitle class="text-2xl">{post.title}</CardTitle>
           </div>
-          <Badge variant={post.status === 'answered' ? 'success' : 'secondary'}>
+          <Badge variant={post.status === 'answered' ? 'default' : 'secondary'}>
             {post.status}
           </Badge>
         </div>
@@ -346,7 +453,7 @@
     <!-- Responses -->
     {#if responses.length > 0}
       <div class="space-y-4 mb-8">
-        {#each responses as response}
+        {#each responses as response (response.id)}
           <Card class={response.is_endorsed ? 'border-green-500' : ''}>
             <CardHeader class="pb-2">
               <div class="flex justify-between">
@@ -369,7 +476,7 @@
                 </div>
                 
                 {#if response.is_endorsed}
-                  <Badge variant="success" class="flex items-center gap-1">
+                  <Badge variant="default" class="flex items-center gap-1">
                     Endorsed
                   </Badge>
                 {/if}
@@ -388,7 +495,7 @@
                   variant="ghost"
                   size="sm"
                   class="flex items-center gap-1"
-                  on:click={() => upvoteResponse(response.id)}
+                  onclick={() => upvoteResponse(response.id)}
                 >
                   👍
                   <span>{response.upvote_count || 0}</span>
@@ -404,7 +511,7 @@
                 <Button
                   variant={response.is_endorsed ? "outline" : "ghost"}
                   size="sm"
-                  on:click={() => endorseResponse(response.id)}
+                  onclick={() => endorseResponse(response.id)}
                 >
                   {response.is_endorsed ? 'Remove Endorsement' : 'Endorse'}
                 </Button>
@@ -415,7 +522,7 @@
               <div class="px-6 pb-4">
                 <Separator class="my-2" />
                 <div class="space-y-2 pl-4 border-l-2 border-muted mt-2">
-                  {#each response.comments as comment}
+                  {#each response.comments as comment (comment.id)}
                     <div class="text-sm">
                       <div class="flex items-center gap-1">
                         <span class="font-medium">
@@ -459,11 +566,9 @@
           </div>
         </CardContent>
         <CardFooter class="flex justify-end">
-          <Button on:click={submitResponse}>
-            Post Response
+          <Button onclick={() => submitResponse()} disabled={submitting}>
+            {submitting ? 'Posting...' : 'Post Response'}
           </Button>
-          
-          
         </CardFooter>
       </Card>
     {:else}

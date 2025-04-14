@@ -14,91 +14,128 @@
   import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert';
   import { X, Plus, AlertCircle } from 'lucide-svelte';
 
+  // TypeScript interfaces
+  interface Course {
+    id: string;
+    code: string;
+    name: string;
+    term: string;
+    description?: string;
+    is_active: boolean;
+  }
+
+  interface Folder {
+    id: string;
+    course_id: string;
+    name: string;
+    order: number;
+  }
+
   const courseId = $page.params.courseId;
   
-  let title = '';
-  let content = '';
-  let postType = 'question';
-  let isPrivate = false;
-  let isAnonymous = false;
-  let selectedFolder = '';
-  let tags = [];
-  let newTag = '';
-  let course = null;
-  let folders = [];
-  let loading = true;
-  let submitting = false;
-  let error = '';
-  let userRole = '';
+  let title: string = '';
+  let content: string = '';
+  let postType: 'question' | 'announcement' | 'note' = 'question';
+  let isPrivate: boolean = false;
+  let isAnonymous: boolean = false;
+  let selectedFolder: string = '';
+  let tags: string[] = [];
+  let newTag: string = '';
+  let course: Course | null = null;
+  let folders: Folder[] = [];
+  let loading: boolean = true;
+  let submitting: boolean = false;
+  let error: string = '';
+  let userRole: string = '';
   
   onMount(async () => {
-    // Check if user is authenticated
+    // Authentication guard
     if (!$user) {
-      goto(`/auth/login?redirect=/courses/${courseId}/ask`);
-      return;
-    }
-    
-    // Load course info
-    const { data: courseData, error: courseError } = await supabase
-      .from('courses')
-      .select('*')
-      .eq('id', courseId)
-      .single();
-      
-    if (courseError) {
-      console.error('Error loading course:', courseError);
-      error = 'Could not load course information';
-    } else {
-      course = courseData;
-    }
-    
-    // Load folders
-    const { data: folderData, error: folderError } = await supabase
-      .from('folders')
-      .select('*')
-      .eq('course_id', courseId)
-      .order('order');
-      
-    if (folderError) {
-      console.error('Error loading folders:', folderError);
-    } else {
-      folders = folderData || [];
-    }
-    
-    // Get user's role in this course
-    if ($user) {
-      const { data: memberData } = await supabase
-        .from('course_members')
-        .select('role')
-        .eq('course_id', courseId)
-        .eq('user_id', $user.id)
-        .single();
+      const { data } = await supabase.auth.getSession();
         
-      if (memberData) {
-        userRole = memberData.role;
-        
-        // Set isAnonymous default based on role
-        if (userRole === 'student') {
-          isAnonymous = true;
-        }
+      if (!data.session) {
+        console.log("No authenticated user found, redirecting to login");
+        const currentPath = window.location.pathname;
+        window.location.href = `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
+        return; // Stop further execution
       }
     }
-    
-    loading = false;
+
+    await loadCourseData();
   });
+
+  async function loadCourseData(): Promise<void> {
+    try {
+      // Load course info
+      const { data: courseData, error: courseError } = await supabase
+        .from('courses')
+        .select('*')
+        .eq('id', courseId)
+        .single();
+        
+      if (courseError) {
+        console.error('Error loading course:', courseError);
+        error = 'Could not load course information';
+        loading = false;
+        return;
+      }
+      
+      course = courseData as Course;
+      
+      // Load folders
+      const { data: folderData, error: folderError } = await supabase
+        .from('folders')
+        .select('*')
+        .eq('course_id', courseId)
+        .order('order');
+        
+      if (folderError) {
+        console.error('Error loading folders:', folderError);
+      } else {
+        folders = folderData as Folder[] || [];
+      }
+      
+      // Get user's role in this course
+      if ($user) {
+        const { data: memberData, error: memberError } = await supabase
+          .from('course_members')
+          .select('role')
+          .eq('course_id', courseId)
+          .eq('user_id', $user.id)
+          .single();
+          
+        if (!memberError && memberData) {
+          userRole = memberData.role;
+          
+          // Set isAnonymous default based on role
+          if (userRole === 'student') {
+            isAnonymous = true;
+          }
+        } else if (memberError) {
+          console.error('Error fetching user role:', memberError);
+          error = 'You do not have permission to post in this course';
+        }
+      }
+    } catch (err) {
+      console.error('Unexpected error loading course data:', err);
+      error = 'An unexpected error occurred';
+    } finally {
+      loading = false;
+    }
+  }
   
-  function addTag() {
+  function addTag(): void {
     if (newTag && !tags.includes(newTag) && tags.length < 5) {
       tags = [...tags, newTag];
       newTag = '';
     }
   }
   
-  function removeTag(tag) {
+  function removeTag(tag: string): void {
     tags = tags.filter(t => t !== tag);
   }
   
-  async function submitPost() {
+  async function submitPost(): Promise<void> {
     if (!title.trim() || !content.trim() || !$user) {
       error = 'Please fill in all required fields';
       return;
@@ -107,37 +144,49 @@
     submitting = true;
     error = '';
     
-    // Only instructors and TAs can create announcements
-    if (postType === 'announcement' && userRole !== 'instructor' && userRole !== 'ta') {
-      error = 'Only instructors and TAs can create announcements';
-      submitting = false;
-      return;
-    }
-    
-    const { data, error: postError } = await supabase
-      .from('posts')
-      .insert({
-        course_id: courseId,
-        user_id: $user.id,
-        title,
-        content,
-        post_type: postType,
-        is_private: isPrivate,
-        anonymous: isAnonymous,
-        folder_id: selectedFolder || null,
-        tags
-      })
-      .select();
+    try {
+      // Only instructors and TAs can create announcements
+      if (postType === 'announcement' && userRole !== 'instructor' && userRole !== 'ta') {
+        error = 'Only instructors and TAs can create announcements';
+        submitting = false;
+        return;
+      }
       
-    if (postError) {
-      console.error('Error creating post:', postError);
-      error = 'Failed to create post. Please try again.';
-    } else if (data) {
-      // Redirect to the new post
-      goto(`/courses/${courseId}/posts/${data[0].id}`);
+      const { data, error: postError } = await supabase
+        .from('posts')
+        .insert({
+          course_id: courseId,
+          user_id: $user.id,
+          title,
+          content,
+          post_type: postType,
+          is_private: isPrivate,
+          anonymous: isAnonymous,
+          folder_id: selectedFolder || null,
+          tags: tags.length > 0 ? tags : null
+        })
+        .select();
+        
+      if (postError) {
+        console.error('Error creating post:', postError);
+        error = 'Failed to create post. Please try again.';
+      } else if (data && data.length > 0) {
+        // Redirect to the new post
+        goto(`/courses/${courseId}/posts/${data[0].id}`);
+      }
+    } catch (err) {
+      console.error('Unexpected error submitting post:', err);
+      error = 'An unexpected error occurred while creating your post';
+    } finally {
+      submitting = false;
     }
-    
-    submitting = false;
+  }
+
+  function handleKeydown(e: KeyboardEvent): void {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addTag();
+    }
   }
 </script>
 
@@ -232,8 +281,8 @@
             <div class="flex gap-2">
               <Input 
                 placeholder="Add a tag" 
-                bind:value={newTag} 
-                on:keydown={(e) => e.key === 'Enter' && (e.preventDefault(), addTag())}
+                bind:value={newTag}
+                on:keydown={handleKeydown}
               />
               <Button type="button" variant="outline" on:click={addTag} disabled={tags.length >= 5}>
                 <Plus class="h-4 w-4" />

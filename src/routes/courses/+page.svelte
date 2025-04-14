@@ -2,17 +2,35 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase/client';
+  import { user } from '$lib/stores/auth';
+  import { Button } from '$lib/components/ui/button';
   import { Card, CardContent } from '$lib/components/ui/card';
   import { Badge } from '$lib/components/ui/badge';
-  import { Button } from '$lib/components/ui/button';
   import { Separator } from '$lib/components/ui/separator';
   import { Alert, AlertDescription } from '$lib/components/ui/alert';
-
-  let activeCourses = [];
-  let inactiveCourses = [];
-  let loading = true;
-  let currentUser = null;
-  let debugInfo = {
+  
+  // Define TypeScript interfaces
+  interface Course {
+    id: string;
+    code: string;
+    name: string;
+    term: string;
+    description?: string;
+    is_active: boolean;
+    role?: string;
+  }
+  
+  interface DebugInfo {
+    rawData: any | null;
+    validEntries: any | null;
+    error: Error | null;
+  }
+  
+  // State variables with types
+  let activeCourses: Course[] = [];
+  let inactiveCourses: Course[] = [];
+  let loading: boolean = true;
+  let debugInfo: DebugInfo = {
     rawData: null,
     validEntries: null,
     error: null
@@ -21,20 +39,27 @@
   onMount(async () => {
     console.log("Courses page mounted");
     
-    // Direct check for auth session - don't rely on the store
-    const { data } = await supabase.auth.getSession();
-    
-    if (data.session) {
-      console.log("Session found directly:", data.session.user.id);
-      currentUser = data.session.user;
-      loadCourses(data.session.user.id);
+    // Use the $user store that's already available
+    if ($user) {
+      console.log("User found in store:", $user.id);
+      await loadCourses($user.id);
     } else {
-      console.log("No session found directly");
-      loading = false;
+      console.log("No user found in store, checking session directly");
+      
+      // Fallback: Direct check for auth session if store isn't ready yet
+      const { data } = await supabase.auth.getSession();
+      
+      if (data.session) {
+        console.log("Session found directly:", data.session.user.id);
+        await loadCourses(data.session.user.id);
+      } else {
+        console.log("No authenticated user found");
+        loading = false;
+      }
     }
   });
   
-  async function loadCourses(userId) {
+  async function loadCourses(userId: string): Promise<void> {
     console.log("Loading courses for user:", userId);
     
     try {
@@ -55,7 +80,7 @@
       
       if (!membershipCheck || membershipCheck.length === 0) {
         console.log('No course memberships found for user');
-        debugInfo.error = { message: 'No course memberships found for user' };
+        debugInfo.error = { message: 'No course memberships found for user' } as any;
         loading = false;
         return;
       }
@@ -95,7 +120,7 @@
       // Check if we have any valid entries
       if (validEntries.length === 0) {
         console.log('No valid course entries found');
-        debugInfo.error = { message: 'No valid course entries found - courses might be missing' };
+        debugInfo.error = { message: 'No valid course entries found - courses might be missing' } as any;
         loading = false;
         return;
       }
@@ -109,7 +134,8 @@
           name: item.courses.name,
           term: item.courses.term,
           description: item.courses.description,
-          role: item.role
+          role: item.role,
+          is_active: true
         }));
         
       inactiveCourses = validEntries
@@ -120,21 +146,22 @@
           name: item.courses.name,
           term: item.courses.term,
           description: item.courses.description,
-          role: item.role
+          role: item.role,
+          is_active: false
         }));
       
       console.log('Active courses:', activeCourses);
       console.log('Inactive courses:', inactiveCourses);
     } catch (err) {
       console.error("Error in loadCourses:", err);
-      debugInfo.error = err;
+      debugInfo.error = err as Error;
     } finally {
       loading = false;
     }
   }
   
   // Helper function to determine term icon
-  function getTermIcon(term) {
+  function getTermIcon(term: string | undefined): string {
     if (!term) return '📚';
     const termLower = String(term).toLowerCase();
     if (termLower.includes('spring') || termLower.includes('semester 1')) return '🌱';
@@ -145,7 +172,7 @@
   }
 
   // Get random color for course cards based on course code
-  function getCardColor(code) {
+  function getCardColor(code: string | undefined): string {
     const colors = [
       'border-blue-200 bg-blue-50 hover:bg-blue-100',
       'border-green-200 bg-green-50 hover:bg-green-100',
@@ -182,7 +209,7 @@
       <div class="flex justify-center py-12">
           <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
       </div>
-  {:else if !currentUser}
+  {:else if !$user}
       <Card class="border-2 border-dashed">
         <CardContent class="flex flex-col items-center py-16">
           <div class="rounded-full bg-muted p-6 mb-6">
@@ -216,7 +243,7 @@
           <div class="space-y-4 text-sm">
             <div>
               <p class="font-medium">User ID:</p>
-              <pre class="bg-muted p-2 rounded-md mt-1 overflow-auto">{currentUser.id}</pre>
+              <pre class="bg-muted p-2 rounded-md mt-1 overflow-auto">{$user.id}</pre>
             </div>
             
             <div>

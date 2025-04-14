@@ -11,113 +11,163 @@
   import { Badge } from '$lib/components/ui/badge';
   import { Separator } from '$lib/components/ui/separator';
 
+  // TypeScript interfaces
+  interface CourseData {
+    id: string;
+    code: string;
+    name: string;
+    term: string;
+    description?: string;
+    is_active: boolean;
+  }
+
+  interface UserData {
+    id: string;
+    full_name: string;
+    role?: string;
+  }
+
+  interface PostData {
+    id: string;
+    title: string;
+    content: string;
+    post_type: 'question' | 'announcement' | 'note';
+    status: 'open' | 'answered' | 'closed';
+    created_at: string;
+    anonymous: boolean;
+    user_id: string;
+    users?: UserData;
+    response_count: number;
+  }
+
   const courseId = $page.params.id;
-  let posts = [];
-  let allPosts = [];
-  let questionPosts = [];
-  let announcementPosts = [];
-  let loading = true;
-  let course = null;
-  let searchQuery = '';
-  let userRole = '';
+  
+  let posts: PostData[] = [];
+  let allPosts: PostData[] = [];
+  let questionPosts: PostData[] = [];
+  let announcementPosts: PostData[] = [];
+  let loading: boolean = true;
+  let course: CourseData | null = null;
+  let searchQuery: string = '';
+  let userRole: string = '';
 
   // Function to load course and posts data
-  async function loadCourseAndPosts() {
-    // Fetch course details
-    const { data: courseData, error: courseError } = await supabase
-      .from('courses')
-      .select('*')
-      .eq('id', courseId)
-      .single();
-    
-    if (courseError) {
-      console.error('Error loading course:', courseError);
-      loading = false;
-      return;
-    }
-    
-    course = courseData;
-    
-    // Get user's role in this course if logged in
-    if ($user) {
-      const { data: memberData } = await supabase
-        .from('course_members')
-        .select('role')
-        .eq('course_id', courseId)
-        .eq('user_id', $user.id)
+  async function loadCourseAndPosts(): Promise<void> {
+    try {
+      // Fetch course details
+      const { data: courseData, error: courseError } = await supabase
+        .from('courses')
+        .select('*')
+        .eq('id', courseId)
         .single();
-        
-      if (memberData) {
-        userRole = memberData.role;
-      }
-    }
-    
-    // Fetch posts with simplified query (no nested subqueries)
-    const { data: postsData, error: postsError } = await supabase
-      .from('posts')
-      .select(`
-        id, 
-        title, 
-        content,
-        post_type,
-        status,
-        created_at,
-        anonymous,
-        user_id
-      `)
-      .eq('course_id', courseId)
-      .eq('is_private', false)
-      .order('created_at', { ascending: false });
-    
-    if (postsError) {
-      console.error('Error loading posts:', postsError);
-      loading = false;
-      return;
-    }
-
-    // Now we need to fetch user details and response counts separately
-    const enhancedPosts = await Promise.all(postsData.map(async (post) => {
-      // Get user info
-      let userInfo = { full_name: 'Unknown', role: 'student' };
       
-      if (!post.anonymous) {
-        const { data: userData } = await supabase
-          .from('users')
-          .select('full_name, role')
-          .eq('id', post.user_id)
+      if (courseError) {
+        console.error('Error loading course:', courseError);
+        loading = false;
+        return;
+      }
+      
+      course = courseData as CourseData;
+      
+      // Get user's role in this course if logged in
+      if ($user) {
+        const { data: memberData, error: memberError } = await supabase
+          .from('course_members')
+          .select('role')
+          .eq('course_id', courseId)
+          .eq('user_id', $user.id)
           .single();
-        
-        if (userData) {
-          userInfo = userData;
+          
+        if (!memberError && memberData) {
+          userRole = memberData.role;
         }
       }
       
-      // Get response count
-      const { count: responseCount } = await supabase
-        .from('responses')
-        .select('*', { count: 'exact', head: true })
-        .eq('post_id', post.id);
+      // Fetch posts with simplified query (no nested subqueries)
+      const { data: postsData, error: postsError } = await supabase
+        .from('posts')
+        .select(`
+          id, 
+          title, 
+          content,
+          post_type,
+          status,
+          created_at,
+          anonymous,
+          user_id
+        `)
+        .eq('course_id', courseId)
+        .eq('is_private', false)
+        .order('created_at', { ascending: false });
       
-      return {
-        ...post,
-        users: userInfo,
-        response_count: responseCount || 0
-      };
-    }));
-    
-    allPosts = enhancedPosts;
-    questionPosts = enhancedPosts.filter(post => post.post_type === 'question');
-    announcementPosts = enhancedPosts.filter(post => post.post_type === 'announcement');
-    posts = allPosts;
-    
-    loading = false;
+      if (postsError) {
+        console.error('Error loading posts:', postsError);
+        loading = false;
+        return;
+      }
+
+      // Now we need to fetch user details and response counts separately
+      const enhancedPosts = await Promise.all((postsData || []).map(async (post) => {
+        // Get user info
+        let userInfo: UserData = { id: '', full_name: 'Unknown', role: 'student' };
+        
+        if (!post.anonymous) {
+          const { data: userData, error: userError } = await supabase
+            .from('users')
+            .select('full_name, role')
+            .eq('id', post.user_id)
+            .single();
+          
+          if (!userError && userData) {
+            userInfo = {
+              id: post.user_id,
+              full_name: userData.full_name,
+              role: userData.role
+            };
+          }
+        }
+        
+        // Get response count
+        const { count: responseCount, error: countError } = await supabase
+          .from('responses')
+          .select('*', { count: 'exact', head: true })
+          .eq('post_id', post.id);
+        
+        return {
+          ...post,
+          users: userInfo,
+          response_count: responseCount || 0
+        } as PostData;
+      }));
+      
+      allPosts = enhancedPosts;
+      questionPosts = enhancedPosts.filter(post => post.post_type === 'question');
+      announcementPosts = enhancedPosts.filter(post => post.post_type === 'announcement');
+      posts = allPosts;
+    } catch (err) {
+      console.error('Error in loadCourseAndPosts:', err);
+    } finally {
+      loading = false;
+    }
   }
 
-  onMount(() => {
-    loadCourseAndPosts();
+  onMount(async () => {
+    // Authentication guard
+    if (!$user) {
+      const { data } = await supabase.auth.getSession();
+        
+      if (!data.session) {
+        console.log("No authenticated user found, redirecting to login");
+        const currentPath = window.location.pathname;
+        window.location.href = `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
+        return; // Stop further execution
+      }
+    }
+
+    await loadCourseAndPosts();
   });
 
-  async function searchPosts() {
+  async function searchPosts(): Promise<void> {
     loading = true;
     
     // Client-side search when search query is provided
@@ -136,7 +186,7 @@
     loading = false;
   }
   
-  function handleTabChange(tabValue) {
+  function handleTabChange(tabValue: string): void {
     switch(tabValue) {
       case 'all':
         posts = allPosts;
@@ -153,7 +203,7 @@
   }
   
   // Function to get appropriate status color
-  function getStatusColor(status) {
+  function getStatusColor(status: string): string {
     switch(status) {
       case 'answered':
         return 'bg-green-50 text-green-700 border-green-200';
@@ -165,7 +215,7 @@
   }
   
   // Format date display
-  function formatDate(dateString) {
+  function formatDate(dateString: string): string {
     const date = new Date(dateString);
     return new Intl.DateTimeFormat('en-US', { 
       month: 'short', 
@@ -175,7 +225,7 @@
   }
   
   // Generate initials from name
-  function getInitials(name) {
+  function getInitials(name: string | undefined): string {
     if (!name || name === 'Unknown') return 'U';
     return name
       .split(' ')
@@ -185,7 +235,7 @@
   }
   
   // Get post type icon
-  function getPostTypeIcon(type) {
+  function getPostTypeIcon(type: string): string {
     if (type === 'question') {
       return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="10"></circle>
@@ -206,6 +256,11 @@
         <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
       </svg>`;
     }
+  }
+  
+  function handleSearch(e: Event): void {
+    e.preventDefault();
+    searchPosts();
   }
 </script>
 
