@@ -73,3 +73,6 @@
     @apply bg-background text-foreground;
   }
 }
+:root {
+  font-family: 'Noto Sans', sans-serif;
+}

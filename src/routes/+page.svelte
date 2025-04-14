@@ -35,7 +35,6 @@
           <Button href="/courses" size="lg" class="shadow-md shadow-primary/10">View Your Courses</Button>
         {:else}
           <Button href="/auth/login" size="lg" class="shadow-md shadow-primary/10">Sign In</Button>
-          <Button href="/auth/register" variant="outline" size="lg">Register</Button>
         {/if}
       </div>
     </div>
@@ -86,6 +85,7 @@
         <div class="mb-4 md:mb-0">
           <p class="font-semibold text-lg">4rum</p>
           <p class="text-sm text-gray-500">Anonymous Q&A</p>
+          <p class="text-sm text-gray-500 mt-1">Now used in Foundation Programming class at KDAI, KMITL</p>
         </div>
         <div class="flex gap-6">
           <a href="/about" class="text-sm text-gray-500 hover:text-gray-900">About</a>
