@@ -1,860 +1,924 @@
-<!-- src/routes/courses/[id]/+page.svelte -->
+<!-- src/routes/courses/+page.svelte -->
 <script lang="ts">
-  import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { supabase } from '$lib/supabase/client';
   import { user } from '$lib/stores/auth';
   import { Button } from '$lib/components/ui/button';
-  import { Input } from '$lib/components/ui/input';
-  import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
-  import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
+  import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from '$lib/components/ui/card';
   import { Badge } from '$lib/components/ui/badge';
   import { Separator } from '$lib/components/ui/separator';
-  import * as Accordion from '$lib/components/ui/accordion';
-  import * as DropdownMenu from "$lib/components/ui/dropdown-menu";
-  import { Avatar, AvatarFallback } from '$lib/components/ui/avatar';
+  import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert';
+  import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
   
-  // Import markdown parser library
-  import { marked } from 'marked';
-  import DOMPurify from 'dompurify';
-
-  // TypeScript interfaces
-  interface CourseData {
+  // Define TypeScript interfaces
+  interface Course {
     id: string;
     code: string;
     name: string;
     term: string;
     description?: string;
     is_active: boolean;
-  }
-
-  interface UserData {
-    id: string;
-    full_name: string;
     role?: string;
   }
-
-  interface FolderData {
-    id: string;
-    name: string;
-    order: number;
-    posts?: PostData[];
-  }
-
-  interface PostData {
-    id: string;
-    title: string;
-    content: string;
-    post_type: 'question' | 'announcement' | 'note';
-    status: 'open' | 'answered' | 'closed';
-    created_at: string;
-    anonymous: boolean;
-    user_id: string;
-    folder_id?: string;
-    users?: UserData;
-    response_count: number;
-  }
-
-  const courseId = $page.params.id;
   
-  let posts: PostData[] = [];
-  let allPosts: PostData[] = [];
-  let questionPosts: PostData[] = [];
-  let announcementPosts: PostData[] = [];
-  let folders: FolderData[] = [];
+  interface DebugInfo {
+    rawData: any | null;
+    validEntries: any | null;
+    error: Error | null;
+  }
+  
+  // State variables with types
+  let activeCourses: Course[] = [];
+  let inactiveCourses: Course[] = [];
   let loading: boolean = true;
-  let course: CourseData | null = null;
-  let searchQuery: string = '';
-  let userRole: string = '';
-  let currentTab: string = 'all';
-  let currentFolder: string | null = null;
-
-  // Function to load course and posts data
-  async function loadCourseAndPosts(): Promise<void> {
-    try {
-      // Fetch course details
-      const { data: courseData, error: courseError } = await supabase
-        .from('courses')
-        .select('*')
-        .eq('id', courseId)
-        .single();
+  let searchTerm: string = '';
+  let activeTab: 'active' | 'inactive' | 'all' = 'all';
+  let debugInfo: DebugInfo = {
+    rawData: null,
+    validEntries: null,
+    error: null
+  };
+  
+  // Course layout view - grid or list
+  let viewMode: 'grid' | 'list' = 'grid';
+  
+  // Current term - derived from active courses
+  $: currentTerm = activeCourses.length > 0 
+    ? activeCourses[0].term 
+    : 'Spring 2025'; // Fallback
+  
+  onMount(async () => {
+    console.log("Courses page mounted");
+    
+    // Use the $user store that's already available
+    if ($user) {
+      console.log("User found in store:", $user.id);
+      await loadCourses($user.id);
+    } else {
+      console.log("No user found in store, checking session directly");
       
-      if (courseError) {
-        console.error('Error loading course:', courseError);
-        loading = false;
-        return;
-      }
+      // Fallback: Direct check for auth session if store isn't ready yet
+      const { data } = await supabase.auth.getSession();
       
-      course = courseData as CourseData;
-      
-      // Get user's role in this course if logged in
-      if ($user) {
-        const { data: memberData, error: memberError } = await supabase
-          .from('course_members')
-          .select('role')
-          .eq('course_id', courseId)
-          .eq('user_id', $user.id)
-          .single();
-          
-        if (!memberError && memberData) {
-          userRole = memberData.role;
-        }
-      }
-      
-      // Load folders
-      const { data: folderData, error: folderError } = await supabase
-        .from('folders')
-        .select('*')
-        .eq('course_id', courseId)
-        .order('order');
-        
-      if (folderError) {
-        console.error('Error loading folders:', folderError);
+      if (data.session) {
+        console.log("Session found directly:", data.session.user.id);
+        await loadCourses(data.session.user.id);
       } else {
-        folders = (folderData || []) as FolderData[];
+        console.log("No authenticated user found");
+        loading = false;
       }
-      
-      // Fetch posts with simplified query
-      const { data: postsData, error: postsError } = await supabase
-        .from('posts')
-        .select(`
-          id, 
-          title, 
-          content,
-          post_type,
-          status,
-          created_at,
-          anonymous,
-          user_id,
-          folder_id
-        `)
-        .eq('course_id', courseId)
-        .eq('is_private', false)
-        .order('created_at', { ascending: false });
-      
-      if (postsError) {
-        console.error('Error loading posts:', postsError);
+    }
+  });
+  
+  async function loadCourses(userId: string): Promise<void> {
+    console.log("Loading courses for user:", userId);
+    
+    try {
+      // First, let's check if the user has any course memberships
+      const { data: membershipCheck, error: membershipError } = await supabase
+        .from('course_members')
+        .select('course_id')
+        .eq('user_id', userId);
+        
+      if (membershipError) {
+        console.error('Error checking memberships:', membershipError);
+        debugInfo.error = membershipError;
         loading = false;
         return;
       }
-
-      // Now we need to fetch user details and response counts separately
-      const enhancedPosts = await Promise.all((postsData || []).map(async (post) => {
-        // Get user info
-        let userInfo: UserData = { id: '', full_name: 'Unknown', role: 'student' };
-        
-        if (!post.anonymous) {
-          const { data: userData, error: userError } = await supabase
-            .from('users')
-            .select('full_name, role')
-            .eq('id', post.user_id)
-            .single();
-          
-          if (!userError && userData) {
-            userInfo = {
-              id: post.user_id,
-              full_name: userData.full_name,
-              role: userData.role
-            };
-          }
-        }
-        
-        // Get response count
-        const { count: responseCount, error: countError } = await supabase
-          .from('responses')
-          .select('*', { count: 'exact', head: true })
-          .eq('post_id', post.id);
-        
-        return {
-          ...post,
-          users: userInfo,
-          response_count: responseCount || 0
-        } as PostData;
-      }));
       
-      allPosts = enhancedPosts;
-      questionPosts = enhancedPosts.filter(post => post.post_type === 'question');
-      announcementPosts = enhancedPosts.filter(post => post.post_type === 'announcement');
+      console.log('Membership check:', membershipCheck);
       
-      // Group posts by folder
-      folders = folders.map(folder => {
-        const folderPosts = enhancedPosts.filter(post => post.folder_id === folder.id);
-        return {
-          ...folder,
-          posts: folderPosts
-        };
-      });
-      
-      // Add an "Uncategorized" virtual folder for posts without a folder
-      const uncategorizedPosts = enhancedPosts.filter(post => !post.folder_id);
-      if (uncategorizedPosts.length > 0) {
-        folders.push({
-          id: 'uncategorized',
-          name: 'Uncategorized',
-          order: 9999,
-          posts: uncategorizedPosts
-        });
+      if (!membershipCheck || membershipCheck.length === 0) {
+        console.log('No course memberships found for user');
+        debugInfo.error = { message: 'No course memberships found for user' } as any;
+        loading = false;
+        return;
       }
       
-      posts = allPosts;
+      // Now load the full course data
+      const { data, error } = await supabase
+        .from('course_members')
+        .select(`
+          role,
+          courses:course_id (
+            id, 
+            code, 
+            name,
+            term,
+            description,
+            is_active
+          )
+        `)
+        .eq('user_id', userId);
+        
+      if (error) {
+        console.error('Error loading courses:', error);
+        debugInfo.error = error;
+        loading = false;
+        return;
+      }
+      
+      console.log('Raw course data:', data);
+      debugInfo.rawData = data;
+      
+      // Process the data - handle empty results correctly
+      const validEntries = data ? data.filter(item => item && item.courses) : [];
+      debugInfo.validEntries = validEntries;
+      
+      console.log('Valid entries:', validEntries);
+      
+      // Check if we have any valid entries
+      if (validEntries.length === 0) {
+        console.log('No valid course entries found');
+        debugInfo.error = { message: 'No valid course entries found - courses might be missing' } as any;
+        loading = false;
+        return;
+      }
+      
+      // Separate active and inactive courses
+      activeCourses = validEntries
+        .filter(item => item.courses.is_active === true)
+        .map(item => ({
+          id: item.courses.id,
+          code: item.courses.code,
+          name: item.courses.name,
+          term: item.courses.term,
+          description: item.courses.description,
+          role: item.role,
+          is_active: true
+        }))
+        .sort((a, b) => a.code.localeCompare(b.code)); // Sort by course code
+        
+      inactiveCourses = validEntries
+        .filter(item => item.courses.is_active === false)
+        .map(item => ({
+          id: item.courses.id,
+          code: item.courses.code,
+          name: item.courses.name,
+          term: item.courses.term,
+          description: item.courses.description,
+          role: item.role,
+          is_active: false
+        }))
+        .sort((a, b) => a.code.localeCompare(b.code)); // Sort by course code
+      
+      console.log('Active courses:', activeCourses);
+      console.log('Inactive courses:', inactiveCourses);
     } catch (err) {
-      console.error('Error in loadCourseAndPosts:', err);
+      console.error("Error in loadCourses:", err);
+      debugInfo.error = err as Error;
     } finally {
       loading = false;
     }
   }
-
-  onMount(async () => {
-    // Authentication guard
-    if (!$user) {
-      const { data } = await supabase.auth.getSession();
-        
-      if (!data.session) {
-        console.log("No authenticated user found, redirecting to login");
-        const currentPath = window.location.pathname;
-        window.location.href = `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
-        return; // Stop further execution
-      }
-    }
-
-    await loadCourseAndPosts();
-  });
-
-  async function searchPosts(): Promise<void> {
-    loading = true;
-    
-    // Client-side search when search query is provided
-    if (searchQuery.trim() === '') {
-      setCurrentView(currentTab, currentFolder);
-      loading = false;
-      return;
-    }
-    
-    const query = searchQuery.toLowerCase();
-    let filtered = allPosts.filter(post => 
-      post.title.toLowerCase().includes(query) || 
-      post.content.toLowerCase().includes(query)
-    );
-    
-    // Additional filtering based on tab
-    if (currentTab === 'questions') {
-      filtered = filtered.filter(post => post.post_type === 'question');
-    } else if (currentTab === 'announcements') {
-      filtered = filtered.filter(post => post.post_type === 'announcement');
-    }
-    
-    // Additional filtering based on folder
-    if (currentFolder) {
-      filtered = filtered.filter(post => post.folder_id === currentFolder);
-    }
-    
-    posts = filtered;
-    loading = false;
-  }
   
-  function handleTabChange(tabValue: string): void {
-    currentTab = tabValue;
-    setCurrentView(tabValue, currentFolder);
-  }
+  // Filtered courses based on search and active tab
+  $: filteredCourses = searchTerm
+    ? filterCourses()
+    : activeTab === 'active' 
+      ? activeCourses 
+      : activeTab === 'inactive' 
+        ? inactiveCourses 
+        : [...activeCourses, ...inactiveCourses];
   
-  function handleFolderChange(folderId: string | null): void {
-    currentFolder = folderId;
-    setCurrentView(currentTab, folderId);
-  }
-  
-  function setCurrentView(tab: string, folderId: string | null): void {
-    let filteredPosts = allPosts;
+  // Filter courses based on search term
+  function filterCourses() {
+    const searchLower = searchTerm.toLowerCase();
+    const matchingCourses = [];
     
-    // First filter by tab
-    if (tab === 'questions') {
-      filteredPosts = questionPosts;
-    } else if (tab === 'announcements') {
-      filteredPosts = announcementPosts;
-    }
-    
-    // Then filter by folder if a folder is selected
-    if (folderId) {
-      filteredPosts = filteredPosts.filter(post => 
-        folderId === 'uncategorized' 
-          ? !post.folder_id 
-          : post.folder_id === folderId
+    if (activeTab === 'active' || activeTab === 'all') {
+      matchingCourses.push(
+        ...activeCourses.filter(course => 
+          course.code.toLowerCase().includes(searchLower) ||
+          course.name.toLowerCase().includes(searchLower) ||
+          (course.description && course.description.toLowerCase().includes(searchLower))
+        )
       );
     }
     
-    posts = filteredPosts;
-  }
-  
-  // Function to get appropriate status color
-  function getStatusColor(status: string): string {
-    switch(status) {
-      case 'answered':
-        return 'bg-green-50 text-green-700 border-green-200';
-      case 'open':
-        return 'bg-blue-50 text-blue-700 border-blue-200';
-      default:
-        return 'bg-gray-50 text-gray-700 border-gray-200';
+    if (activeTab === 'inactive' || activeTab === 'all') {
+      matchingCourses.push(
+        ...inactiveCourses.filter(course => 
+          course.code.toLowerCase().includes(searchLower) ||
+          course.name.toLowerCase().includes(searchLower) ||
+          (course.description && course.description.toLowerCase().includes(searchLower))
+        )
+      );
     }
-  }
-  
-  // Format date display
-  function formatDate(dateString: string): string {
-    const date = new Date(dateString);
-    return new Intl.DateTimeFormat('en-US', { 
-      month: 'short', 
-      day: 'numeric',
-      year: 'numeric'
-    }).format(date);
-  }
-  
-  // Generate initials from name
-  function getInitials(name: string | undefined): string {
-    if (!name || name === 'Unknown') return 'U';
-    return name
-      .split(' ')
-      .map(n => n[0])
-      .join('')
-      .toUpperCase();
-  }
-  
-  // Get post type icon
-  function getPostTypeIcon(type: string): string {
-    if (type === 'question') {
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="10"></circle>
-        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-        <path d="M12 17h.01"></path>
-      </svg>`;
-    } else if (type === 'announcement') {
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M19 4v16"></path>
-        <path d="M15 4v16"></path>
-        <path d="M11 4v16"></path>
-        <path d="M7 4v16"></path>
-        <path d="M3 4v16"></path>
-      </svg>`;
-    } else {
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-      </svg>`;
-    }
-  }
-  
-  // Get folder icon
-  function getFolderIcon(name: string): string {
-    // Generate consistent color based on folder name
-    const hashCode = name.split('').reduce((a, b) => {
-      a = ((a << 5) - a) + b.charCodeAt(0);
-      return a & a;
-    }, 0);
     
+    return matchingCourses;
+  }
+  
+  // Helper function to determine term icon
+  function getTermIcon(term: string | undefined): string {
+    if (!term) return '📚';
+    const termLower = String(term).toLowerCase();
+    if (termLower.includes('spring') || termLower.includes('semester 1')) return '🌱';
+    if (termLower.includes('fall') || termLower.includes('semester 2')) return '🍂';
+    if (termLower.includes('summer')) return '☀️';
+    if (termLower.includes('winter')) return '❄️';
+    return '📚';
+  }
+  
+  // Get random color for course cards based on course code
+  function getCardColor(code: string | undefined, isActive: boolean): string {
+    if (!isActive) {
+      return 'border-gray-200 bg-muted/5 hover:bg-muted/15 text-muted-foreground';
+    }
+    
+    // Define colors for active courses
     const colors = [
-      'text-blue-500',
-      'text-green-500',
-      'text-purple-500',
-      'text-amber-500',
-      'text-rose-500',
-      'text-indigo-500',
-      'text-emerald-500',
-      'text-pink-500'
+      'border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100/40 hover:from-blue-100 hover:to-blue-200/40',
+      'border-green-200 bg-gradient-to-br from-green-50 to-green-100/40 hover:from-green-100 hover:to-green-200/40',
+      'border-purple-200 bg-gradient-to-br from-purple-50 to-purple-100/40 hover:from-purple-100 hover:to-purple-200/40',
+      'border-pink-200 bg-gradient-to-br from-pink-50 to-pink-100/40 hover:from-pink-100 hover:to-pink-200/40',
+      'border-yellow-200 bg-gradient-to-br from-yellow-50 to-yellow-100/40 hover:from-yellow-100 hover:to-yellow-200/40',
+      'border-indigo-200 bg-gradient-to-br from-indigo-50 to-indigo-100/40 hover:from-indigo-100 hover:to-indigo-200/40',
+      'border-teal-200 bg-gradient-to-br from-teal-50 to-teal-100/40 hover:from-teal-100 hover:to-teal-200/40',
+      'border-amber-200 bg-gradient-to-br from-amber-50 to-amber-100/40 hover:from-amber-100 hover:to-amber-200/40',
     ];
     
-    const colorClass = colors[Math.abs(hashCode) % colors.length];
+    if (!code) return colors[0];
     
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${colorClass}">
-      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-9l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z"></path>
-    </svg>`;
-  }
-  
-  // Render markdown content preview
-  function renderMarkdownPreview(content: string): string {
-    // Limit content length for preview
-    const previewContent = content.length > 300 
-      ? content.substring(0, 300) + '...' 
-      : content;
-      
-    // Parse markdown and sanitize HTML
-    return DOMPurify.sanitize(marked.parse(previewContent));
-  }
-  
-  // Count posts in folder
-  function countPostsInFolder(folderId: string): number {
-    if (folderId === 'uncategorized') {
-      return allPosts.filter(post => !post.folder_id).length;
+    // Hash function to get consistent color based on course code
+    let hash = 0;
+    for (let i = 0; i < code.length; i++) {
+      hash = ((hash << 5) - hash) + code.charCodeAt(i);
+      hash = hash & hash; // Convert to 32bit integer
     }
-    return allPosts.filter(post => post.folder_id === folderId).length;
+    return colors[Math.abs(hash) % colors.length];
   }
   
-  function handleSearch(e: Event): void {
-    e.preventDefault();
-    searchPosts();
+  // Get role badge styling based on role
+  function getRoleBadgeStyle(role: string | undefined): string {
+    if (!role) return 'bg-gray-100 text-gray-700';
+    
+    switch(role.toLowerCase()) {
+      case 'instructor':
+        return 'bg-amber-100 text-amber-800 border-amber-200';
+      case 'ta':
+        return 'bg-purple-100 text-purple-800 border-purple-200';
+      case 'student':
+        return 'bg-blue-100 text-blue-800 border-blue-200';
+      default:
+        return 'bg-gray-100 text-gray-700 border-gray-200';
+    }
   }
 </script>
 
-<div class="container mx-auto py-8 px-4 md:px-6">
-  {#if course}
-    <!-- Course Header -->
-    <div class="mb-8">
-      <!-- Breadcrumb -->
-      <div class="flex items-center text-sm text-muted-foreground mb-4">
-        <a href="/courses" class="hover:text-primary transition-colors">Courses</a>
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-2 h-4 w-4">
-          <polyline points="9 18 15 12 9 6"></polyline>
-        </svg>
-        <span class="font-medium text-foreground">{course.code}</span>
+<div class="container mx-auto py-8 px-4">
+  <!-- Header Section with Search and Filters -->
+  <div class="flex flex-col lg:flex-row justify-between items-start gap-4 mb-8">
+    <div class="space-y-2">
+      <div class="flex items-center gap-3">
+        <h1 class="text-3xl font-bold">My Courses</h1>
+        {#if !loading && (activeCourses.length > 0 || inactiveCourses.length > 0)}
+          <Badge variant="outline" class="py-1.5 px-3 flex items-center gap-1.5 bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500">
+              <rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
+              <line x1="16" x2="16" y1="2" y2="6"></line>
+              <line x1="8" x2="8" y1="2" y2="6"></line>
+              <line x1="3" x2="21" y1="10" y2="10"></line>
+              <path d="M8 14h.01"></path>
+              <path d="M12 14h.01"></path>
+              <path d="M16 14h.01"></path>
+              <path d="M8 18h.01"></path>
+              <path d="M12 18h.01"></path>
+              <path d="M16 18h.01"></path>
+            </svg>
+            <span class="font-medium">{getTermIcon(currentTerm)} {currentTerm}</span>
+          </Badge>
+        {/if}
       </div>
-      
-      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 class="text-3xl md:text-4xl font-bold mb-2">{course.code}: {course.name}</h1>
-          <div class="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" class="text-sm px-3">
-              <span class="mr-1">{course.term.includes('Fall') ? '🍂' : course.term.includes('Spring') ? '🌱' : course.term.includes('Summer') ? '☀️' : course.term.includes('Winter') ? '❄️' : '📚'}</span>
-              {course.term}
-            </Badge>
-            {#if userRole}
-              <Badge variant="secondary" class="text-sm px-3 capitalize">{userRole}</Badge>
-            {/if}
-            {#if course.is_active}
-              <Badge variant="default" class="bg-green-500 text-white hover:bg-green-600">Active</Badge>
-            {:else}
-              <Badge variant="outline" class="text-muted-foreground">Archived</Badge>
-            {/if}
-          </div>
-        </div>
-        
-        <div class="flex gap-2">
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild>
-              <Button variant="outline" class="gap-2" size="sm">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M3 16V8a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v8a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5Z"></path>
-                  <path d="M10 10a2 2 0 1 1 4 0v6"></path>
-                  <path d="M10 16h4"></path>
-                </svg>
-                <span>New</span>
-              </Button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Content align="end" class="w-48">
-              <DropdownMenu.Item href="/courses/{courseId}/ask?type=question" class="gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                  <path d="M12 17h.01"></path>
-                </svg>
-                <span>Ask Question</span>
-              </DropdownMenu.Item>
-              {#if userRole === 'instructor' || userRole === 'ta'}
-                <DropdownMenu.Item href="/courses/{courseId}/ask?type=announcement" class="gap-2">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M19 4v16"></path>
-                    <path d="M15 4v16"></path>
-                    <path d="M11 4v16"></path>
-                    <path d="M7 4v16"></path>
-                    <path d="M3 4v16"></path>
-                  </svg>
-                  <span>Announcement</span>
-                </DropdownMenu.Item>
-              {/if}
-              <DropdownMenu.Item href="/courses/{courseId}/ask?type=note" class="gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
-                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
-                </svg>
-                <span>Create Note</span>
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
-        </div>
-      </div>
-      
-      {#if course.description}
-        <div class="mt-4 p-4 bg-muted/20 rounded-lg border border-muted">
-          <p class="text-muted-foreground">{course.description}</p>
-        </div>
-      {/if}
+      <p class="text-muted-foreground">Access your enrolled courses and learning materials</p>
     </div>
     
-    <div class="grid grid-cols-12 gap-6">
-      <!-- Sidebar - Folders -->
-      <div class="col-span-12 md:col-span-3 space-y-6">
-        <!-- Search -->
-        <div>
-          <form on:submit|preventDefault={handleSearch} class="flex gap-2 w-full">
-            <div class="relative flex-1">
-              <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <path d="m21 21-4.3-4.3"></path>
-                </svg>
-              </div>
-              <Input placeholder="Search..." bind:value={searchQuery} class="pl-10" />
-            </div>
-            <Button type="submit" variant="default" size="icon">
-              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="m22 22-6-6"></path>
-                <circle cx="11" cy="11" r="8"></circle>
-              </svg>
-            </Button>
-          </form>
+    <div class="w-full lg:w-auto flex flex-col sm:flex-row gap-3">
+      <!-- Search Input -->
+      <div class="relative flex-1">
+        <div class="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="m21 21-4.3-4.3"></path>
+          </svg>
         </div>
-        
-        <!-- Filters -->
-        <div class="bg-card border rounded-lg overflow-hidden">
-          <div class="p-4 border-b bg-muted/30">
-            <h3 class="font-medium text-sm flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"></path>
-              </svg>
-              Filters
-            </h3>
-          </div>
-          <div class="p-2">
-            <Button 
-              variant={currentTab === 'all' && !currentFolder ? "default" : "ghost"} 
-              size="sm"
-              class="w-full justify-start gap-2 mb-1"
-              onclick={() => {
-                handleTabChange('all');
-                handleFolderChange(null);
-              }}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path>
-              </svg>
-              <span>All Posts</span>
-              <span class="ml-auto bg-muted text-muted-foreground text-xs rounded-full px-2 py-0.5">
-                {allPosts.length}
-              </span>
-            </Button>
-            
-            <Button 
-              variant={currentTab === 'questions' && !currentFolder ? "default" : "ghost"} 
-              size="sm"
-              class="w-full justify-start gap-2 mb-1"
-              onclick={() => {
-                handleTabChange('questions');
-                handleFolderChange(null);
-              }}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
-                <path d="M12 17h.01"></path>
-              </svg>
-              <span>Questions</span>
-              <span class="ml-auto bg-muted text-muted-foreground text-xs rounded-full px-2 py-0.5">
-                {questionPosts.length}
-              </span>
-            </Button>
-            
-            <Button 
-              variant={currentTab === 'announcements' && !currentFolder ? "default" : "ghost"} 
-              size="sm"
-              class="w-full justify-start gap-2"
-              onclick={() => {
-                handleTabChange('announcements');
-                handleFolderChange(null);
-              }}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M19 4v16"></path>
-                <path d="M15 4v16"></path>
-                <path d="M11 4v16"></path>
-                <path d="M7 4v16"></path>
-                <path d="M3 4v16"></path>
-              </svg>
-              <span>Announcements</span>
-              <span class="ml-auto bg-muted text-muted-foreground text-xs rounded-full px-2 py-0.5">
-                {announcementPosts.length}
-              </span>
-            </Button>
-          </div>
-        </div>
-        
-        <!-- Folders -->
-        {#if folders.length > 0}
-          <div class="bg-card border rounded-lg overflow-hidden">
-            <div class="p-4 border-b bg-muted/30">
-              <h3 class="font-medium text-sm flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-9l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z"></path>
-                </svg>
-                Folders
-              </h3>
-            </div>
-            <div class="p-2">
-              <Accordion.Root collapsible>
-                {#each folders as folder (folder.id)}
-                  <Accordion.Item value={folder.id} class="border-0">
-                    <Accordion.Trigger
-                      class={`flex justify-between items-center w-full p-2.5 text-sm font-medium rounded-md ${currentFolder === folder.id ? 'bg-primary text-primary-foreground hover:bg-primary/90' : 'hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent/50'}`}
-                      onclick={() => handleFolderChange(folder.id)}
-                    >
-                      <div class="flex items-center gap-2">
-                        <span innerHTML={getFolderIcon(folder.name)}></span>
-                        <span>{folder.name}</span>
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <span class="bg-muted/50 text-muted-foreground text-xs rounded-full px-2 py-0.5">
-                          {countPostsInFolder(folder.id)}
-                        </span>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="data-[state=open]:rotate-180 transition-transform duration-200">
-                          <polyline points="6 9 12 15 18 9"></polyline>
-                        </svg>
-                      </div>
-                    </Accordion.Trigger>
-                    <Accordion.Content class="pt-1 pb-2 px-2">
-                      <div class="pl-6 border-l border-muted space-y-1 mt-1">
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          class="w-full justify-start gap-2"
-                          onclick={() => {
-                            handleTabChange('all');
-                            handleFolderChange(folder.id);
-                          }}
-                        >
-                          <span>All Types</span>
-                        </Button>
-                        
-                        {#if (folder.posts || []).some(post => post.post_type === 'announcement')}
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            class="w-full justify-start gap-2"
-                            onclick={() => {
-                              handleTabChange('announcements');
-                              handleFolderChange(folder.id);
-                            }}
-                          >
-                            <span>Announcements Only</span>
-                          </Button>
-                        {/if}
-                        
-                        {#if (folder.posts || []).some(post => post.post_type === 'note')}
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            class="w-full justify-start gap-2"
-                            onclick={() => {
-                              handleTabChange('notes');
-                              handleFolderChange(folder.id);
-                            }}
-                          >
-                            <span>Notes Only</span>
-                          </Button>
-                        {/if}
-                      </div>
-                    </Accordion.Content>
-                  </Accordion.Item>
-                {/each}
-              </Accordion.Root>
-            </div>
-          </div>
+        <input 
+          type="text" 
+          bind:value={searchTerm}
+          placeholder="Search courses..." 
+          class="w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+        />
+        {#if searchTerm}
+          <button 
+            class="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
+            on:click={() => searchTerm = ''}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
         {/if}
       </div>
       
-      <!-- Main Content -->
-      <div class="col-span-12 md:col-span-9">
-        <!-- Post list -->
-        <Card>
-          <CardHeader class="pb-3">
-            <div class="flex justify-between items-center">
-              <CardTitle class="text-xl">
-                {#if currentFolder}
-                  {folders.find(f => f.id === currentFolder)?.name || 'Posts'}
-                {:else if currentTab === 'questions'}
-                  Questions
-                {:else if currentTab === 'announcements'}
-                  Announcements
-                {:else}
-                  All Posts
-                {/if}
-              </CardTitle>
-              
-              {#if searchQuery}
-                <Badge variant="outline" class="flex gap-1 px-3 py-1">
-                  <span>Search: {searchQuery}</span>
-                  <button 
-                    class="opacity-70 hover:opacity-100"
-                    onclick={() => { 
-                      searchQuery = ''; 
-                      setCurrentView(currentTab, currentFolder); 
-                    }}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M18 6 6 18"></path>
-                      <path d="m6 6 12 12"></path>
-                    </svg>
-                  </button>
-                </Badge>
-              {/if}
-            </div>
+      <!-- View Toggle -->
+      <div class="flex rounded-md border overflow-hidden">
+        <button 
+          type="button"
+          class={`flex items-center justify-center w-10 h-10 ${viewMode === 'grid' ? 'bg-primary text-primary-foreground' : 'bg-transparent hover:bg-muted/20'}`}
+          on:click={() => viewMode = 'grid'}
+          aria-label="Grid view"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="7" height="7" x="3" y="3" rx="1"></rect>
+            <rect width="7" height="7" x="14" y="3" rx="1"></rect>
+            <rect width="7" height="7" x="14" y="14" rx="1"></rect>
+            <rect width="7" height="7" x="3" y="14" rx="1"></rect>
+          </svg>
+        </button>
+        <button 
+          type="button"
+          class={`flex items-center justify-center w-10 h-10 ${viewMode === 'list' ? 'bg-primary text-primary-foreground' : 'bg-transparent hover:bg-muted/20'}`}
+          on:click={() => viewMode = 'list'}
+          aria-label="List view"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="8" x2="21" y1="6" y2="6"></line>
+            <line x1="8" x2="21" y1="12" y2="12"></line>
+            <line x1="8" x2="21" y1="18" y2="18"></line>
+            <line x1="3" x2="3.01" y1="6" y2="6"></line>
+            <line x1="3" x2="3.01" y1="12" y2="12"></line>
+            <line x1="3" x2="3.01" y1="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+  
+  {#if loading}
+    <div class="flex flex-col items-center justify-center py-20">
+      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <p class="mt-4 text-muted-foreground animate-pulse">Loading your courses...</p>
+    </div>
+  {:else if !$user}
+    <!-- Not Logged In State -->
+    <Card class="border-2 border-dashed bg-gradient-to-br from-muted/20 to-muted/5">
+      <CardContent class="flex flex-col items-center py-16">
+        <div class="rounded-full bg-blue-50 border border-blue-200 p-6 mb-6">
+          <!-- Users Icon as SVG -->
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+        </div>
+        <h2 class="text-2xl font-semibold mb-4 text-center">Sign in to view your courses</h2>
+        <p class="text-muted-foreground text-center max-w-md mb-8">
+          You need to be logged in to see the courses you're enrolled in and access your learning materials.
+        </p>
+        <a href="/auth/login?redirect=/courses">
+          <Button size="lg" class="px-8">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2">
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+              <polyline points="10 17 15 12 10 7"></polyline>
+              <line x1="15" x2="3" y1="12" y2="12"></line>
+            </svg>
+            Sign In
+          </Button>
+        </a>
+      </CardContent>
+    </Card>
+  {:else if debugInfo.error}
+    <!-- Error State -->
+    <div class="px-4 py-6 border-2 border-dashed rounded-lg bg-muted/5">
+      <div class="max-w-3xl mx-auto">
+        <Alert variant="destructive" class="mb-6 border-2">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2">
+            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+            <path d="M12 9v4"></path>
+            <path d="M12 17h.01"></path>
+          </svg>
+          <AlertTitle>Error Loading Courses</AlertTitle>
+          <AlertDescription>
+            {debugInfo.error.message || 'Unknown error occurred while loading your courses.'}
+          </AlertDescription>
+        </Alert>
+        
+        <Card class="overflow-hidden bg-white">
+          <CardHeader class="bg-muted/20 border-b">
+            <CardTitle class="flex items-center gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500">
+                <path d="m18 16 4-4-4-4"></path>
+                <path d="m6 8-4 4 4 4"></path>
+                <path d="m14.5 4-5 16"></path>
+              </svg>
+              Debug Information
+            </CardTitle>
+            <CardDescription>Technical details about the error to help troubleshoot the issue</CardDescription>
           </CardHeader>
           
-          <CardContent class="p-0">
-            {#if loading}
-              <div class="flex justify-center py-12">
-                <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
+          <CardContent class="p-5 space-y-6">
+            <div>
+              <h3 class="text-sm font-semibold mb-2 text-muted-foreground">User ID:</h3>
+              <div class="bg-muted p-3 rounded-md text-sm font-mono overflow-auto">
+                {$user.id}
               </div>
-            {:else if posts.length === 0}
-              <div class="text-center py-16 bg-muted/20 rounded-md">
-                <div class="flex flex-col items-center">
-                  <div class="h-16 w-16 rounded-full bg-muted/50 flex items-center justify-center mb-4">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
-                      <path d="M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h8"></path>
-                      <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
-                      <path d="M16 19h6"></path>
-                      <path d="M19 16v6"></path>
-                    </svg>
-                  </div>
-                  
-                  {#if searchQuery}
-                    <h3 class="text-xl font-medium mb-2">No posts match your search</h3>
-                    <p class="text-muted-foreground max-w-sm mx-auto">Try adjusting your search terms or clear the search</p>
-                    <Button variant="outline" class="mt-4" onclick={() => { searchQuery = ''; setCurrentView(currentTab, currentFolder); }}>
-                      Clear Search
-                    </Button>
-                  {:else if currentFolder}
-                    <h3 class="text-xl font-medium mb-2">No posts in this folder</h3>
-                    <p class="text-muted-foreground max-w-sm mx-auto">Try selecting a different folder or create a new post</p>
-                    <div class="flex gap-2 mt-4">
-                      <Button variant="outline" onclick={() => handleFolderChange(null)}>
-                        View All Posts
-                      </Button>
-                      <Button href="/courses/{courseId}/ask">
-                        Create Post
-                      </Button>
-                    </div>
-                  {:else}
-                    <h3 class="text-xl font-medium mb-2">No posts found</h3>
-                    <p class="text-muted-foreground max-w-sm mx-auto">Be the first to create a post in this course</p>
-                    <Button href="/courses/{courseId}/ask" class="mt-4">
-                      Create Post
-                    </Button>
-                  {/if}
-                </div>
+            </div>
+            
+            <div>
+              <h3 class="text-sm font-semibold mb-2 text-muted-foreground">Error Message:</h3>
+              <div class="bg-red-50 text-red-800 p-3 rounded-md text-sm font-mono border border-red-100 overflow-auto">
+                {JSON.stringify(debugInfo.error, null, 2)}
               </div>
-            {:else}
-              <div class="divide-y">
-                {#each posts as post}
-                  <div class="p-4 md:p-6 flex flex-col md:flex-row gap-4 hover:bg-muted/5 transition-colors">
-                    <!-- Post metadata (left side) -->
-                    <div class="md:w-44 flex flex-row md:flex-col justify-between">
-                      <div class="flex items-center gap-2">
-                        <Avatar class="h-8 w-8">
-                          <AvatarFallback class="bg-primary/10 text-primary">
-                            {post.anonymous ? 'A' : getInitials(post.users?.full_name)}
-                          </AvatarFallback>
-                        </Avatar>
-                        
-                        <div>
-                          <div class="text-sm font-medium truncate">
-                            {post.anonymous ? 'Anonymous' : post.users?.full_name || 'Unknown'}
-                          </div>
-                          <div class="text-xs text-muted-foreground">
-                            {formatDate(post.created_at)}
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div class="flex md:flex-col gap-2 md:mt-3 items-end md:items-start">
-                        <div class="flex items-center gap-1 bg-muted/30 px-2 py-1 rounded text-xs">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M7 9h10M7 4h6" />
-                            <path d="M7 14h2" />
-                            <path d="M15 14h2" />
-                            <rect x="3" y="2" width="18" height="20" rx="2" />
-                          </svg>
-                          <span>{post.response_count}</span>
-                        </div>
-                        
-                        <Badge variant={post.post_type === 'announcement' ? 'secondary' : 'outline'} class="flex items-center gap-1 h-6">
-                          <span class="text-xs" innerHTML={getPostTypeIcon(post.post_type)}></span>
-                          <span class="capitalize text-xs">{post.post_type}</span>
-                        </Badge>
-                        
-                        {#if post.post_type === 'question'}
-                          <div class={`px-2 py-0.5 text-xs rounded-full border ${getStatusColor(post.status)}`}>
-                            {post.status}
-                          </div>
-                        {/if}
-                      </div>
-                    </div>
-                    
-                    <!-- Post content (right side) -->
-                    <div class="flex-1 overflow-hidden">
-                      <a href="/courses/{courseId}/posts/{post.id}" class="block group">
-                        <h3 class="text-lg font-semibold mb-2 group-hover:text-primary transition-colors">
-                          {post.title}
-                        </h3>
-                        
-                        <div class="prose prose-sm max-w-none text-muted-foreground line-clamp-3 mb-4">
-                          {@html renderMarkdownPreview(post.content)}
-                        </div>
-                      </a>
-                      
-                      <div class="flex items-center justify-between mt-auto">
-                        {#if post.folder_id && post.folder_id !== 'uncategorized'}
-                          <Badge variant="outline" class="text-xs">
-                            <span class="mr-1" innerHTML={getFolderIcon(folders.find(f => f.id === post.folder_id)?.name || 'Folder')}></span>
-                            {folders.find(f => f.id === post.folder_id)?.name || 'Folder'}
-                          </Badge>
-                        {:else}
-                          <div></div>
-                        {/if}
-                        
-                        <Button variant="ghost" size="sm" href="/courses/{courseId}/posts/{post.id}" class="gap-1">
-                          <span>View</span>
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M5 12h14"></path>
-                            <path d="m12 5 7 7-7 7"></path>
-                          </svg>
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                {/each}
+            </div>
+            
+            <div>
+              <h3 class="text-sm font-semibold mb-2 text-muted-foreground">Raw Course Data:</h3>
+              <div class="bg-muted p-3 rounded-md text-sm font-mono max-h-40 overflow-auto">
+                {JSON.stringify(debugInfo.rawData, null, 2)}
               </div>
-            {/if}
+            </div>
+            
+            <Separator />
+            
+            <div class="flex justify-center pt-2">
+              <a href="/debug">
+                <Button variant="outline" class="flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"></path>
+                  </svg>
+                  Go to Debug Page
+                </Button>
+              </a>
+            </div>
           </CardContent>
         </Card>
       </div>
     </div>
-  {:else if loading}
-    <div class="flex justify-center py-12">
-      <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
-    </div>
   {:else}
-    <!-- Course not found state -->
-    <div class="text-center py-12">
-      <div class="flex flex-col items-center">
-        <div class="h-20 w-20 rounded-full bg-muted/50 flex items-center justify-center mb-6">
-          <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
-            <circle cx="12" cy="12" r="10"></circle>
-            <path d="M12 8v4"></path>
-            <path d="M12 16h.01"></path>
-          </svg>
+    <!-- Course Content -->
+    {#if activeCourses.length === 0 && inactiveCourses.length === 0}
+      <!-- No Courses State -->
+      <div class="text-center py-16 rounded-lg border-2 border-dashed bg-muted/5">
+        <div class="flex flex-col items-center max-w-md mx-auto">
+          <div class="size-20 rounded-full bg-blue-50 border border-blue-200 flex items-center justify-center mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500">
+              <path d="M16 6h3a1 1 0 0 1 1 1v11a2 2 0 0 1-2 2h-4a2 2 0 0 0 1-1.5"></path>
+              <path d="M12 6h-3a1 1 0 0 0-1 1v11a2 2 0 0 0 2 2h5c.27 0 .5-.5.5-.5"></path>
+              <path d="M3 15h6"></path>
+              <path d="m7 19-4-4 4-4"></path>
+            </svg>
+          </div>
+          <h2 class="text-2xl font-semibold mb-3">No courses found</h2>
+          <p class="text-muted-foreground mb-8">You aren't enrolled in any courses yet. Please contact your administrator to get started.</p>
+          
+          <a href="/debug">
+            <Button variant="outline">Go to Debug Page</Button>
+          </a>
         </div>
-        <h2 class="text-2xl font-semibold mb-2">Course Not Found</h2>
-        <p class="text-muted-foreground mb-6">The course you're looking for doesn't exist or you don't have access to it.</p>
-        <Button href="/courses" variant="outline">Back to Courses</Button>
       </div>
-    </div>
-  {/if}
-</div> post.post_type === 'question')}
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            class="w-full justify-start gap-2"
-                            onclick={() => {
-                              handleTabChange('questions');
-                              handleFolderChange(folder.id);
-                            }}
-                          >
-                            <span>Questions Only</span>
-                          </Button>
-                        {/if}
+    {:else}
+      <!-- Tabs for Course Types -->
+      <Tabs value={activeTab} class="mb-6"
+        onValueChange={(value) => activeTab = value as 'active' | 'inactive' | 'all'}>
+        <TabsList class="grid w-full md:w-auto grid-cols-3 mb-8">
+          <TabsTrigger value="all" class="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+            All Courses
+            <Badge variant="outline" class="ml-2 bg-muted">{activeCourses.length + inactiveCourses.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="active" class="data-[state=active]:bg-green-600 data-[state=active]:text-white">
+            Active
+            <Badge variant="outline" class="ml-2 bg-muted">{activeCourses.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="inactive" class="data-[state=active]:bg-gray-500 data-[state=active]:text-white">
+            Archived
+            <Badge variant="outline" class="ml-2 bg-muted">{inactiveCourses.length}</Badge>
+          </TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="all" class="mt-0">
+          <!-- Combined View -->
+          {#if searchTerm && filteredCourses.length === 0}
+            <div class="text-center py-16 bg-muted/10 rounded-lg border">
+              <div class="flex flex-col items-center">
+                <div class="size-16 rounded-full bg-muted/20 flex items-center justify-center mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.3-4.3"></path>
+                  </svg>
+                </div>
+                <h3 class="text-xl font-medium mb-2">No courses match your search</h3>
+                <p class="text-muted-foreground mb-4">Try adjusting your search terms</p>
+                <Button variant="outline" onclick={() => searchTerm = ''}>Clear Search</Button>
+              </div>
+            </div>
+          {:else}
+            {#if activeCourses.length > 0}
+              <h2 class="text-xl font-semibold mb-4 flex items-center">
+                <span class="inline-block w-3 h-3 bg-green-500 rounded-full mr-2"></span>
+                Active Courses
+              </h2>
+              
+              {#if viewMode === 'grid'}
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-10">
+                  {#each filteredCourses.filter(course => course.is_active) as course, i (course.id)}
+                    <div class="transition-all duration-500" style="animation: fadeIn {i * 100 + 200}ms ease-out forwards">
+                      <Card class={`border-2 h-full overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-lg ${getCardColor(course.code, true)}`}>
+                        <CardHeader class="pb-3">
+                          <div class="flex justify-between items-start">
+                            <Badge variant="outline" class="text-xs font-normal">
+                              <span class="mr-1">{getTermIcon(course.term)}</span> {course.term}
+                            </Badge>
+                            
+                            {#if course.role}
+                              <Badge variant="secondary" class={`text-xs font-normal capitalize ${getRoleBadgeStyle(course.role)}`}>
+                                {course.role}
+                              </Badge>
+                            {/if}
+                          </div>
+                        </CardHeader>
                         
-                        {#if (folder.posts || []).some(post =>
+                        <CardContent class="pt-0">
+                          <h3 class="text-gray-500 text-sm mb-1">{course.code}</h3>
+                          <h4 class="text-xl font-semibold mb-3 line-clamp-2">{course.name}</h4>
+                          
+                          {#if course.description}
+                            <p class="text-sm text-muted-foreground mb-6 line-clamp-2">
+                              {course.description}
+                            </p>
+                          {/if}
+                        </CardContent>
+                        
+                        <CardFooter class="pt-3 border-t">
+                          <a href="/courses/{course.id}" class="w-full">
+                            <Button variant="default" class="w-full font-medium">
+                              Enter Course
+                              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-1">
+                                <path d="m9 18 6-6-6-6"></path>
+                              </svg>
+                            </Button>
+                          </a>
+                        </CardFooter>
+                      </Card>
+                    </div>
+                  {/each}
+                </div>
+              {:else}
+                <div class="space-y-3 mb-10">
+                  {#each filteredCourses.filter(course => course.is_active) as course, i (course.id)}
+                    <div class="transition-all duration-500" style="animation: fadeIn {i * 100 + 200}ms ease-out forwards">
+                      <a href="/courses/{course.id}" class="block">
+                        <Card class={`border-l-4 border-green-500 overflow-hidden hover:shadow transition-all duration-300`}>
+                          <div class="flex flex-col md:flex-row md:items-center p-4">
+                            <div class="flex-1 min-w-0 mb-3 md:mb-0 md:mr-4">
+                              <div class="flex items-center gap-2 mb-1">
+                                <Badge variant="outline" class="text-xs font-normal">
+                                  <span class="mr-1">{getTermIcon(course.term)}</span> {course.term}
+                                </Badge>
+                                
+                                {#if course.role}
+                                  <Badge variant="secondary" class={`text-xs font-normal capitalize ${getRoleBadgeStyle(course.role)}`}>
+                                    {course.role}
+                                  </Badge>
+                                {/if}
+                              </div>
+                              
+                              <h3 class="text-gray-500 text-sm">{course.code}</h3>
+                              <h4 class="text-lg font-semibold truncate">{course.name}</h4>
+                            </div>
+                            
+                            <Button variant="default" size="sm" class="self-end md:self-auto">
+                              Enter Course
+                            </Button>
+                          </div>
+                        </Card>
+                      </a>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            {/if}
+            
+            {#if inactiveCourses.length > 0 && filteredCourses.some(c => !c.is_active)}
+              <h2 class="text-xl font-semibold mb-4 flex items-center">
+                <span class="inline-block w-3 h-3 bg-gray-400 rounded-full mr-2"></span>
+                Archived Courses
+              </h2>
+              
+              {#if viewMode === 'grid'}
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {#each filteredCourses.filter(course => !course.is_active) as course, i (course.id)}
+                    <div class="transition-all duration-500" style="animation: fadeIn {i * 100 + 200}ms ease-out forwards">
+                      <Card class={`h-full overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-sm ${getCardColor(course.code, false)}`}>
+                        <CardHeader class="pb-3">
+                          <div class="flex justify-between items-start">
+                            <Badge variant="outline" class="text-xs font-normal opacity-70">
+                              <span class="mr-1">{getTermIcon(course.term)}</span> {course.term}
+                            </Badge>
+                            
+                            {#if course.role}
+                              <Badge variant="outline" class="text-xs font-normal capitalize opacity-70">
+                                {course.role}
+                              </Badge>
+                            {/if}
+                          </div>
+                        </CardHeader>
+                        
+                        <CardContent class="pt-0">
+                          <h3 class="text-gray-500 text-sm mb-1">{course.code}</h3>
+                          <h4 class="text-xl font-semibold text-muted-foreground mb-3 line-clamp-2">{course.name}</h4>
+                          
+                          {#if course.description}
+                            <p class="text-sm text-muted-foreground mb-6 line-clamp-2 opacity-70">
+                              {course.description}
+                            </p>
+                          {/if}
+                        </CardContent>
+                        
+                        <CardFooter class="pt-3 border-t">
+                          <a href="/courses/{course.id}" class="w-full">
+                            <Button variant="outline" class="w-full opacity-80">
+                              View Archive
+                            </Button>
+                          </a>
+                        </CardFooter>
+                      </Card>
+                    </div>
+                  {/each}
+                </div>
+              {:else}
+                <div class="space-y-3">
+                  {#each filteredCourses.filter(course => !course.is_active) as course, i (course.id)}
+                    <div class="transition-all duration-500" style="animation: fadeIn {i * 100 + 200}ms ease-out forwards">
+                      <a href="/courses/{course.id}" class="block">
+                        <Card class="border-l-4 border-gray-300 overflow-hidden hover:shadow-sm transition-all duration-300">
+                          <div class="flex flex-col md:flex-row md:items-center p-4">
+                            <div class="flex-1 min-w-0 mb-3 md:mb-0 md:mr-4">
+                              <div class="flex items-center gap-2 mb-1">
+                                <Badge variant="outline" class="text-xs font-normal opacity-70">
+                                  <span class="mr-1">{getTermIcon(course.term)}</span> {course.term}
+                                </Badge>
+                                
+                                {#if course.role}
+                                  <Badge variant="outline" class="text-xs font-normal capitalize opacity-70">
+                                    {course.role}
+                                  </Badge>
+                                {/if}
+                              </div>
+                              
+                              <h3 class="text-gray-500 text-sm">{course.code}</h3>
+                              <h4 class="text-lg font-semibold text-muted-foreground truncate">{course.name}</h4>
+                            </div>
+                            
+                            <Button variant="outline" size="sm" class="self-end md:self-auto opacity-80">
+                              View Archive
+                            </Button>
+                          </div>
+                        </Card>
+                      </a>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            {/if}
+          {/if}
+        </TabsContent>
+        
+        <TabsContent value="active" class="mt-0">
+          <!-- Active Courses -->
+          {#if searchTerm && filteredCourses.length === 0}
+            <div class="text-center py-16 bg-muted/10 rounded-lg border">
+              <div class="flex flex-col items-center">
+                <div class="size-16 rounded-full bg-muted/20 flex items-center justify-center mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.3-4.3"></path>
+                  </svg>
+                </div>
+                <h3 class="text-xl font-medium mb-2">No active courses match your search</h3>
+                <p class="text-muted-foreground mb-4">Try adjusting your search terms</p>
+                <Button variant="outline" onclick={() => searchTerm = ''}>Clear Search</Button>
+              </div>
+            </div>
+          {:else if activeCourses.length === 0}
+            <div class="text-center py-16 bg-muted/10 rounded-lg border border-dashed">
+              <div class="flex flex-col items-center">
+                <div class="size-16 rounded-full bg-muted/30 flex items-center justify-center mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
+                    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                  </svg>
+                </div>
+                <h3 class="text-xl font-medium mb-2">No active courses</h3>
+                <p class="text-muted-foreground mb-6">You are not enrolled in any active courses</p>
+              </div>
+            </div>
+          {:else}
+            {#if viewMode === 'grid'}
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {#each filteredCourses as course, i (course.id)}
+                  <div class="transition-all duration-500" style="animation: fadeIn {i * 100 + 200}ms ease-out forwards">
+                    <Card class={`border-2 h-full overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-lg ${getCardColor(course.code, true)}`}>
+                      <CardHeader class="pb-3">
+                        <div class="flex justify-between items-start">
+                          <Badge variant="outline" class="text-xs font-normal">
+                            <span class="mr-1">{getTermIcon(course.term)}</span> {course.term}
+                          </Badge>
+                          
+                          {#if course.role}
+                            <Badge variant="secondary" class={`text-xs font-normal capitalize ${getRoleBadgeStyle(course.role)}`}>
+                              {course.role}
+                            </Badge>
+                          {/if}
+                        </div>
+                      </CardHeader>
+                          
+                      <CardContent class="pt-0">
+                        <h3 class="text-gray-500 text-sm mb-1">{course.code}</h3>
+                        <h4 class="text-xl font-semibold mb-3 line-clamp-2">{course.name}</h4>
+                        
+                        {#if course.description}
+                          <p class="text-sm text-muted-foreground mb-6 line-clamp-2">
+                            {course.description}
+                          </p>
+                        {/if}
+                      </CardContent>
+                      
+                      <CardFooter class="pt-3 border-t">
+                        <a href="/courses/{course.id}" class="w-full">
+                          <Button variant="default" class="w-full font-medium">
+                            Enter Course
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ml-1">
+                              <path d="m9 18 6-6-6-6"></path>
+                            </svg>
+                          </Button>
+                        </a>
+                      </CardFooter>
+                    </Card>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <div class="space-y-3">
+                {#each filteredCourses as course, i (course.id)}
+                  <div class="transition-all duration-500" style="animation: fadeIn {i * 100 + 200}ms ease-out forwards">
+                    <a href="/courses/{course.id}" class="block">
+                      <Card class="border-l-4 border-green-500 overflow-hidden hover:shadow transition-all duration-300">
+                        <div class="flex flex-col md:flex-row md:items-center p-4">
+                          <div class="flex-1 min-w-0 mb-3 md:mb-0 md:mr-4">
+                            <div class="flex items-center gap-2 mb-1">
+                              <Badge variant="outline" class="text-xs font-normal">
+                                <span class="mr-1">{getTermIcon(course.term)}</span> {course.term}
+                              </Badge>
+                              
+                              {#if course.role}
+                                <Badge variant="secondary" class={`text-xs font-normal capitalize ${getRoleBadgeStyle(course.role)}`}>
+                                  {course.role}
+                                </Badge>
+                              {/if}
+                            </div>
+                            
+                            <h3 class="text-gray-500 text-sm">{course.code}</h3>
+                            <h4 class="text-lg font-semibold truncate">{course.name}</h4>
+                          </div>
+                          
+                          <Button variant="default" size="sm" class="self-end md:self-auto">
+                            Enter Course
+                          </Button>
+                        </div>
+                      </Card>
+                    </a>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          {/if}
+        </TabsContent>
+        
+        <TabsContent value="inactive" class="mt-0">
+          <!-- Inactive Courses -->
+          {#if searchTerm && filteredCourses.length === 0}
+            <div class="text-center py-16 bg-muted/10 rounded-lg border">
+              <div class="flex flex-col items-center">
+                <div class="size-16 rounded-full bg-muted/20 flex items-center justify-center mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.3-4.3"></path>
+                  </svg>
+                </div>
+                <h3 class="text-xl font-medium mb-2">No archived courses match your search</h3>
+                <p class="text-muted-foreground mb-4">Try adjusting your search terms</p>
+                <Button variant="outline" onclick={() => searchTerm = ''}>Clear Search</Button>
+              </div>
+            </div>
+          {:else if inactiveCourses.length === 0}
+            <div class="text-center py-16 bg-muted/10 rounded-lg border border-dashed">
+              <div class="flex flex-col items-center">
+                <div class="size-16 rounded-full bg-muted/30 flex items-center justify-center mb-4">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-muted-foreground">
+                    <rect width="20" height="5" x="2" y="3" rx="1"></rect>
+                    <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path>
+                    <path d="M10 12h4"></path>
+                  </svg>
+                </div>
+                <h3 class="text-xl font-medium mb-2">No archived courses</h3>
+                <p class="text-muted-foreground">Courses are archived at the end of the term</p>
+              </div>
+            </div>
+          {:else}
+            {#if viewMode === 'grid'}
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {#each filteredCourses as course, i (course.id)}
+                  <div class="transition-all duration-500" style="animation: fadeIn {i * 100 + 200}ms ease-out forwards">
+                    <Card class={`h-full overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-sm ${getCardColor(course.code, false)}`}>
+                      <CardHeader class="pb-3">
+                        <div class="flex justify-between items-start">
+                          <Badge variant="outline" class="text-xs font-normal opacity-70">
+                            <span class="mr-1">{getTermIcon(course.term)}</span> {course.term}
+                          </Badge>
+                          
+                          {#if course.role}
+                            <Badge variant="outline" class="text-xs font-normal capitalize opacity-70">
+                              {course.role}
+                            </Badge>
+                          {/if}
+                        </div>
+                      </CardHeader>
+                          
+                      <CardContent class="pt-0">
+                        <h3 class="text-gray-500 text-sm mb-1">{course.code}</h3>
+                        <h4 class="text-xl font-semibold text-muted-foreground mb-3 line-clamp-2">{course.name}</h4>
+                        
+                        {#if course.description}
+                          <p class="text-sm text-muted-foreground mb-6 line-clamp-2 opacity-70">
+                            {course.description}
+                          </p>
+                        {/if}
+                      </CardContent>
+                      
+                      <CardFooter class="pt-3 border-t">
+                        <a href="/courses/{course.id}" class="w-full">
+                          <Button variant="outline" class="w-full opacity-80">
+                            View Archive
+                          </Button>
+                        </a>
+                      </CardFooter>
+                    </Card>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <div class="space-y-3">
+                {#each filteredCourses as course, i (course.id)}
+                  <div class="transition-all duration-500" style="animation: fadeIn {i * 100 + 200}ms ease-out forwards">
+                    <a href="/courses/{course.id}" class="block">
+                      <Card class="border-l-4 border-gray-300 overflow-hidden hover:shadow-sm transition-all duration-300">
+                        <div class="flex flex-col md:flex-row md:items-center p-4">
+                          <div class="flex-1 min-w-0 mb-3 md:mb-0 md:mr-4">
+                            <div class="flex items-center gap-2 mb-1">
+                              <Badge variant="outline" class="text-xs font-normal opacity-70">
+                                <span class="mr-1">{getTermIcon(course.term)}</span> {course.term}
+                              </Badge>
+                              
+                              {#if course.role}
+                                <Badge variant="outline" class="text-xs font-normal capitalize opacity-70">
+                                  {course.role}
+                                </Badge>
+                              {/if}
+                            </div>
+                            
+                            <h3 class="text-gray-500 text-sm">{course.code}</h3>
+                            <h4 class="text-lg font-semibold text-muted-foreground truncate">{course.name}</h4>
+                          </div>
+                          
+                          <Button variant="outline" size="sm" class="self-end md:self-auto opacity-80">
+                            View Archive
+                          </Button>
+                        </div>
+                      </Card>
+                    </a>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          {/if}
+        </TabsContent>
+      </Tabs>
+    {/if}
+  {/if}
+</div>
+
+<style>
+  @keyframes fadeIn {
+    0% {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+</style>

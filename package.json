@@ -54,6 +54,9 @@
 	},
 	"dependencies": {
 		"@supabase/supabase-js": "^2.49.4",
-		"lucide-svelte": "^0.487.0"
+		"@types/dompurify": "^3.0.5",
+		"dompurify": "^3.2.5",
+		"lucide-svelte": "^0.487.0",
+		"marked": "^15.0.8"
 	}
 }
