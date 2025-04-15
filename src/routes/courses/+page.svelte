@@ -26,7 +26,7 @@
     validEntries: any | null;
     error: Error | null;
   }
-  
+  let userRole: string = '';
   // State variables with types
   let activeCourses: Course[] = [];
   let inactiveCourses: Course[] = [];
@@ -121,6 +121,7 @@
       
       console.log('Raw course data:', data);
       debugInfo.rawData = data;
+      userRole = data.role;
       
       // Process the data - handle empty results correctly
       const validEntries = data ? data.filter(item => item && item.courses) : [];

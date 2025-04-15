@@ -15,6 +15,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Avatar, AvatarFallback, AvatarImage } from '$lib/components/ui/avatar';
+	import { ensureAuthenticated } from '$lib/stores/auth'; // Import the new function
 
 	// Import markdown parser library
 	import { marked } from 'marked';
@@ -86,18 +87,6 @@
 			course = courseData as CourseData;
 
 			// Get user's role in this course if logged in
-			if ($user) {
-				const { data: memberData, error: memberError } = await supabase
-					.from('course_members')
-					.select('role')
-					.eq('course_id', courseId)
-					.eq('user_id', $user.id)
-					.single();
-
-				if (!memberError && memberData) {
-					userRole = memberData.role;
-				}
-			}
 
 			// Load folders
 			const { data: folderData, error: folderError } = await supabase
@@ -206,19 +195,56 @@
 		}
 	}
 	onMount(async () => {
-		// Authentication guard
-		if (!$user) {
-			const { data } = await supabase.auth.getSession();
+    // First, ensure we have authentication
+    let currentUser = $user;
+    
+    if (!currentUser) {
+        console.log('No user in store, checking session');
+        // Try to get session data directly
+        const { data } = await supabase.auth.getSession();
 
-			if (!data.session) {
-				console.log('No authenticated user found, redirecting to login');
-				const currentPath = window.location.pathname;
-				window.location.href = `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
-				return; // Stop further execution
-			}
-		}
-		await loadCourseAndPosts();
-	});
+        if (!data.session) {
+            console.log('No authenticated user found, redirecting to login');
+            const currentPath = window.location.pathname;
+            window.location.href = `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
+            return; // Stop further execution
+        }
+        
+        // Important: Wait for auth initialization to complete and update the user store
+        console.log('Session found, ensuring user data is loaded');
+        await ensureAuthenticated(); // Use the new function from updated auth.ts
+        
+        // Get the updated user value after initialization
+        currentUser = $user;
+        
+        // Still no user? Something went wrong
+        if (!currentUser) {
+            console.log('Failed to load user data');
+            return;
+        }
+    }
+    
+    // Now we definitely have user data, proceed
+    console.log('User authenticated:', currentUser.id);
+    
+    // Get user's role in this course
+    const { data: memberData, error: memberError } = await supabase
+        .from('course_members')
+        .select('role')
+        .eq('course_id', courseId)
+        .eq('user_id', currentUser.id)
+        .single();
+
+    if (memberError) {
+        console.error('Error fetching role:', memberError);
+    } else if (memberData) {
+        userRole = memberData.role;
+        console.log('User role:', userRole);
+    }
+    
+    // Load posts data
+    await loadCourseAndPosts();
+});
 	async function searchPosts(): Promise<void> {
 		loading = true;
 
@@ -528,8 +554,10 @@
 							>
 							{course.term}
 						</Badge>
-						{#if userRole}
-							<Badge variant="secondary" class="px-3 text-sm capitalize">{userRole}</Badge>
+						{#if userRole && userRole.trim() !== ''}
+							<Badge variant="secondary" class="select-none px-3 text-sm capitalize">
+								{userRole}
+							</Badge>
 						{/if}
 						{#if course.is_active}
 							<Badge variant="default" class="bg-green-500 text-white hover:bg-green-600"

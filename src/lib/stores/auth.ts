@@ -271,3 +271,34 @@ export async function getUserData(userId: string) {
     return null;
   }
 }
+export async function ensureAuthenticated(): Promise<boolean> {
+  // If auth is not initialized, initialize it
+  if (!isInitialized) {
+    console.log("[Auth] Ensuring auth is initialized");
+    await initAuth(true);
+  }
+  
+  // Check if user is in store
+  let currentUser: UserData | null = null;
+  const unsubscribe = user.subscribe(u => {
+    currentUser = u;
+  });
+  unsubscribe();
+  
+  if (currentUser) {
+    console.log("[Auth] User found in store");
+    return true;
+  }
+  
+  // No user in store, check session directly
+  console.log("[Auth] No user in store, checking session directly");
+  const { data } = await supabase.auth.getSession();
+  
+  if (data.session) {
+    console.log("[Auth] Session found, re-syncing user");
+    return true;
+  }
+  
+  console.log("[Auth] No session found, user is not authenticated");
+  return false;
+}
