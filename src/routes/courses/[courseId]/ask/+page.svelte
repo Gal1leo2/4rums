@@ -48,23 +48,77 @@
   let submitting: boolean = false;
   let error: string = '';
   let userRole: string = '';
+  let authStateChanging = false;
+let lastAuthChangeTime = 0;
+const AUTH_STABILIZATION_DELAY = 2000; // 2 seconds
   
-  onMount(async () => {
-    // Authentication guard
-    if (!$user) {
-      const { data } = await supabase.auth.getSession();
+onMount(async () => {
+  // Track whether we've seen an auth event since page load
+  let hadAuthStateChange = false;
+  
+  // Authentication guard
+  if (!$user) {
+    const { data } = await supabase.auth.getSession();
         
-      if (!data.session) {
-        console.log("No authenticated user found, redirecting to login");
-        const currentPath = window.location.pathname;
-        window.location.href = `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
-        return; // Stop further execution
-      }
+    if (!data.session) {
+      console.log("No authenticated user found, redirecting to login");
+      const currentPath = window.location.pathname;
+      window.location.href = `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
+      return; // Stop further execution
     }
+  }
 
-    await loadCourseData();
+  // Start loading course data
+  await loadCourseData();
+  
+  // Set up auth state change listener
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    console.log(`Auth state change detected: ${event}`);
+    hadAuthStateChange = true;
+    
+    // After an auth change, we need to manually refresh the connection
+    if (event === 'SIGNED_IN') {
+      // Wait a brief moment for internal state to update
+      setTimeout(async () => {
+        console.log("Performing post-auth connection refresh...");
+        try {
+          // Force a new connection by doing a simple read operation
+          await supabase
+            .from('posts')
+            .select('count', { count: 'exact', head: true })
+            .limit(1);
+          console.log("Post-auth connection refresh successful");
+        } catch (e) {
+          console.warn("Post-auth connection refresh failed:", e);
+        }
+      }, 500);
+    }
   });
-
+  
+  // Start connection pings immediately
+  console.log("Starting connection pings...");
+  const pingInterval = setInterval(async () => {
+    try {
+      // Simple lightweight ping to keep the connection warm
+      const start = Date.now();
+      await supabase
+        .from('posts')
+        .select('count', { count: 'exact', head: true })
+        .limit(1);
+      
+      const elapsed = Date.now() - start;
+      console.log(`Connection ping successful (${elapsed}ms)`);
+    } catch (e) {
+      console.warn("Connection ping failed:", e);
+    }
+  }, 2000); // Every 2 seconds
+  
+  // Clean up the interval and subscription when component is destroyed
+  return () => {
+    if (pingInterval) clearInterval(pingInterval);
+    subscription.unsubscribe();
+  };
+});
   async function loadCourseData(): Promise<void> {
     try {
       // Load course info
@@ -159,16 +213,9 @@ async function submitPost(): Promise<void> {
       return;
     }
     
-    // Skip session checks entirely and go straight to the API call
-    console.log("5.5. Using user data from store");
     console.log("6. Sending post to API...");
     
-    // Create a timeout promise to catch hanging operations
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Operation timed out')), 10000);
-    });
-    
-    const databasePromise = supabase
+    const { data, error: postError } = await supabase
       .from('posts')
       .insert({
         course_id: courseId,
@@ -183,15 +230,6 @@ async function submitPost(): Promise<void> {
       })
       .select();
     
-    // Race the database operation against the timeout
-    const { data, error: postError } = await Promise.race([
-      databasePromise,
-      timeoutPromise.then(() => {
-        console.error('Database operation timed out');
-        throw new Error('Database operation timed out');
-      })
-    ]);
-    
     console.log("7. API response received", { data: !!data, error: !!postError });
     
     if (postError) {
@@ -205,10 +243,6 @@ async function submitPost(): Promise<void> {
   } catch (err) {
     console.error('9. Error caught:', err);
     error = 'An unexpected error occurred while creating your post';
-    
-    if (err instanceof Error && err.message.includes('timed out')) {
-      error = 'The operation timed out. Please try again or refresh the page.';
-    }
   } finally {
     console.log("10. Finally block - setting submitting to false");
     submitting = false;

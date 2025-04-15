@@ -74,7 +74,7 @@ export async function initAuth(forceRefresh = false) {
       // This reduces unnecessary processing across multiple tabs
       if (event === 'SIGNED_IN' && session) {
         console.log(`[Tab ${tabId}] SIGNED_IN event received, user ID:`, session.user.id);
-        await syncUserWithDatabase(session.user);
+        // await syncUserWithDatabase(session.user);
       } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
         console.log(`[Tab ${tabId}] SIGNED_OUT event received`);
         user.set(null);
