@@ -23,13 +23,12 @@ const INIT_TIMEOUT = 2000; // 2 seconds timeout
 // Track active auth subscriptions
 let activeSubscription: { unsubscribe: () => void } | null = null;
 
-// Generate a unique tab ID to prevent cross-tab interference
+// Generate a unique tab ID for logging
 const tabId = Math.random().toString(36).substring(2, 15);
 
 /**
  * Initialize the authentication state
  * Fetches the current session and updates the user store
- * Now with timeout and retry logic
  */
 export async function initAuth(forceRefresh = false) {
   // Track initialization attempts
@@ -66,22 +65,36 @@ export async function initAuth(forceRefresh = false) {
       activeSubscription.unsubscribe();
     }
     
-    // Set up auth state change listener
+    // Set up auth state change listener with minimal operations
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log(`[Tab ${tabId}] Auth state change event:`, event);
       
-      // Ignore events that shouldn't impact this tab
-      // This reduces unnecessary processing across multiple tabs
+      // Only update the store based on events, without database operations
       if (event === 'SIGNED_IN' && session) {
         console.log(`[Tab ${tabId}] SIGNED_IN event received, user ID:`, session.user.id);
-        // await syncUserWithDatabase(session.user);
-      } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+        // Get user info from database but don't wait for it
+        getUserData(session.user.id)
+          .then(userData => {
+            if (userData) {
+              // Update the store with existing user data
+              user.set({
+                id: userData.id,
+                email: userData.email,
+                full_name: userData.full_name,
+                role: userData.role,
+                user_metadata: session.user.user_metadata
+              });
+            }
+          })
+          .catch(err => {
+            console.error(`[Tab ${tabId}] Error getting user data during auth change:`, err);
+          });
+      } else if (event === 'SIGNED_OUT') {
         console.log(`[Tab ${tabId}] SIGNED_OUT event received`);
-        user.set(null);
+        user.set(null);      
       } else if (event === 'TOKEN_REFRESHED' && session) {
-        // On token refresh, we might want to update the user data
+        // Just log token refreshes, no database operations
         console.log(`[Tab ${tabId}] TOKEN_REFRESHED event received`);
-        await syncUserWithDatabase(session.user);
       }
     });
     
@@ -112,7 +125,7 @@ export async function initAuth(forceRefresh = false) {
 
 /**
  * Actual authentication initialization logic
- * Separated to support the timeout mechanism
+ * Now simplified to only handle existing users
  */
 async function initializeAuth() {
   // Get the current session
@@ -120,164 +133,25 @@ async function initializeAuth() {
   
   if (session) {
     console.log(`[Tab ${tabId}] Session found during init, user ID:`, session.user.id);
-    await syncUserWithDatabase(session.user);
+    // Get user data from database
+    const userData = await getUserData(session.user.id);
+    
+    if (userData) {
+      // Update the store with database info
+      user.set({
+        id: userData.id,
+        email: userData.email,
+        full_name: userData.full_name,
+        role: userData.role,
+        user_metadata: session.user.user_metadata
+      });
+    } else {
+      console.warn(`[Tab ${tabId}] User found in auth but not in database:`, session.user.id);
+      user.set(null);
+    }
   } else {
     console.log(`[Tab ${tabId}] No session found during init`);
     user.set(null);
-  }
-}
-
-/**
- * Synchronizes Supabase Auth user with the users table
- * @param authUser - The user object from Supabase Auth
- */
-async function syncUserWithDatabase(authUser: any) {
-  if (!authUser || !authUser.id || !authUser.email) {
-    console.error(`[Tab ${tabId}] Invalid auth user data for sync:`, authUser);
-    return;
-  }
-
-  try {
-    console.log(`[Tab ${tabId}] Syncing user ${authUser.id} with database`);
-    
-    // Check if user already exists in the users table
-    const { data: existingUser, error: fetchError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', authUser.id)
-      .single();
-    
-    if (fetchError) {
-      if (fetchError.code !== 'PGRST116') { // PGRST116 is "row not found"
-        console.error(`[Tab ${tabId}] Error checking user existence:`, fetchError);
-      } else {
-        console.log(`[Tab ${tabId}] User does not exist in database yet`);
-      }
-      
-      // Continue with creation logic below
-    } else {
-      console.log(`[Tab ${tabId}] User found in database:`, existingUser.id);
-      
-      // User exists, update the store with database info
-      user.set({
-        id: existingUser.id,
-        email: existingUser.email,
-        full_name: existingUser.full_name,
-        role: existingUser.role,
-        user_metadata: authUser.user_metadata
-      });
-      
-      // Update their last login - but only occasionally to reduce DB writes across tabs
-      // Use the unique tab ID to create a deterministic pattern
-      const shouldUpdateLastLogin = parseInt(tabId.substring(0, 2), 36) % 5 === 0;
-      if (shouldUpdateLastLogin) {
-        await supabase
-          .from('users')
-          .update({
-            last_login: new Date().toISOString()
-          })
-          .eq('id', authUser.id);
-      }
-        
-      return;
-    }
-
-    // User doesn't exist in our users table, create a new record
-    
-    // Determine role based on email or default to student
-    let role = 'student';
-    if (authUser.email === '66050977@kmitl.ac.th') {
-      role = 'instructor';
-    }
-    
-    console.log(`[Tab ${tabId}] Creating new user in database with role: ${role}`);
-    
-    const { data: newUser, error: insertError } = await supabase
-      .from('users')
-      .insert({
-        id: authUser.id,
-        email: authUser.email,
-        full_name: authUser.user_metadata?.full_name || authUser.user_metadata?.name || 'User',
-        role: role,
-        hashed_password: 'not_used_for_login', // Placeholder for OAuth users
-        last_login: new Date().toISOString()
-      })
-      .select()
-      .single();
-    
-    if (insertError) {
-      console.error(`[Tab ${tabId}] Error creating user in database:`, insertError);
-      return;
-    }
-    
-    console.log(`[Tab ${tabId}] New user created in database:`, newUser.id);
-    
-    // Update the store
-    user.set({
-      id: newUser.id,
-      email: newUser.email,
-      full_name: newUser.full_name,
-      role: newUser.role,
-      user_metadata: authUser.user_metadata
-    });
-    
-    // If this is a special role, also add them to appropriate courses
-    if (role === 'instructor' || role === 'ta') {
-      await setupSpecialUserCourses(authUser.id, role);
-    }
-  } catch (error) {
-    console.error(`[Tab ${tabId}] Error in syncUserWithDatabase:`, error);
-  }
-}
-
-/**
- * Setup course memberships for instructors and TAs
- * @param userId - The user ID
- * @param role - The user role (instructor or ta)
- */
-async function setupSpecialUserCourses(userId: string, role: string) {
-  try {
-    console.log(`[Tab ${tabId}] Setting up course memberships for ${role} user: ${userId}`);
-    
-    // Get all active courses
-    const { data: courses, error: courseError } = await supabase
-      .from('courses')
-      .select('id')
-      .eq('is_active', true);
-    
-    if (courseError) {
-      console.error(`[Tab ${tabId}] Error fetching courses for special user setup:`, courseError);
-      return;
-    }
-    
-    if (!courses || courses.length === 0) {
-      console.log(`[Tab ${tabId}] No active courses found for special user setup`);
-      return;
-    }
-    
-    console.log(`[Tab ${tabId}] Found ${courses.length} active courses to enroll user in`);
-    
-    // Create course memberships for each course
-    const memberships = courses.map(course => ({
-      user_id: userId,
-      course_id: course.id,
-      role: role
-    }));
-    
-    const { error: membershipError } = await supabase
-      .from('course_members')
-      .upsert(memberships, { 
-        onConflict: 'course_id,user_id',
-        ignoreDuplicates: false
-      });
-    
-    if (membershipError) {
-      console.error(`[Tab ${tabId}] Error setting up course memberships:`, membershipError);
-    } else {
-      console.log(`[Tab ${tabId}] Course memberships created successfully`);
-    }
-  } catch (error) {
-    console.error(`[Tab ${tabId}] Error in setupSpecialUserCourses:`, error);
   }
 }
 
@@ -302,10 +176,36 @@ export async function signInWithEmail(email: string, password: string) {
     }
     
     console.log(`[Tab ${tabId}] Sign in successful, user:`, data.user?.id);
+    
+    // Update last login in a non-blocking way after successful sign-in
+    if (data.user) {
+      updateLastLogin(data.user.id).catch(err => {
+        console.error(`[Tab ${tabId}] Failed to update last login:`, err);
+      });
+    }
+    
     return { success: true };
   } catch (error) {
     console.error(`[Tab ${tabId}] Exception during sign in:`, error);
     return { success: false, error: 'An unexpected error occurred' };
+  }
+}
+
+/**
+ * Update the last_login timestamp for a user
+ * Separate function to handle this specific task
+ */
+async function updateLastLogin(userId: string) {
+  try {
+    await supabase
+      .from('users')
+      .update({ last_login: new Date().toISOString() })
+      .eq('id', userId);
+    
+    console.log(`[Tab ${tabId}] Last login updated for user:`, userId);
+  } catch (error) {
+    console.error(`[Tab ${tabId}] Error updating last login:`, error);
+    throw error;
   }
 }
 
