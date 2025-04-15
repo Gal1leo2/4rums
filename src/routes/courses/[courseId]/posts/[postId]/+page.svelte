@@ -13,10 +13,29 @@
   import { Checkbox } from '$lib/components/ui/checkbox';
   import * as Tabs from "$lib/components/ui/tabs";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
+  import { withSessionRefresh } from '$lib/auth/session-handler';
   
-  // Import markdown parser
-  import {marked} from 'marked';
+  // Import markdown parser with syntax highlighting
+  import { marked } from 'marked';
   import DOMPurify from 'dompurify';
+  import hljs from 'highlight.js/lib/common';  // Import highlight.js styles in your +layout.svelte or here (if not globally imported)
+  import 'highlight.js/styles/vs2015.css';
+  
+  // Configure marked with syntax highlighting
+  marked.setOptions({
+    highlight: function(code, lang) {
+      if (lang && hljs.getLanguage(lang)) {
+        try {
+          return hljs.highlight(code, { language: lang }).value;
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      return hljs.highlightAuto(code).value;
+    },
+    gfm: true,
+    breaks: true
+  });
   
   // Define TypeScript interfaces for our data structures
   interface UserData {
@@ -92,6 +111,30 @@
   let endorseConfirmOpen: boolean = false;
   let responseToEndorse: ResponseData | null = null;
   let sortOption: 'newest' | 'oldest' | 'endorsed' | 'upvotes' = 'newest';
+  let sessionCheckInterval: ReturnType<typeof setInterval> | null = null;
+  
+  // Session check to avoid expired token issues
+  function setupSessionCheck() {
+    // Clear any existing interval
+    if (sessionCheckInterval) {
+      clearInterval(sessionCheckInterval);
+    }
+    
+    // Set up a new check every 5 minutes
+    sessionCheckInterval = setInterval(async () => {
+      if ($user) {
+        // Refresh the session
+        const { data, error } = await supabase.auth.refreshSession();
+        if (error) {
+          console.error("Session refresh failed:", error);
+          alert("Your session has expired. Please refresh the page to continue.");
+          clearInterval(sessionCheckInterval!);
+        } else {
+          console.log("Session refreshed successfully");
+        }
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+  }
   
   onMount(async () => {
     if (!$user) {
@@ -104,7 +147,10 @@
         return; // Stop further execution
       }
     }
-
+    
+    // Set up periodic session check
+    setupSessionCheck();
+    
     try {
       // Load post data
       const { data: postData, error: postError } = await supabase
@@ -251,6 +297,13 @@
     } finally {
       loading = false;
     }
+    
+    // Clean up function
+    return () => {
+      if (sessionCheckInterval) {
+        clearInterval(sessionCheckInterval);
+      }
+    };
   });
   
   function sortResponses() {
@@ -287,6 +340,15 @@
     try {
       submitting = true;
       
+      // Refresh auth session before submitting
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session) {
+        console.error("Session error before submitting:", sessionError);
+        alert("Your session has expired. Please refresh the page to continue.");
+        submitting = false;
+        return;
+      }
+      
       const responseType = currentUserRole === 'student' 
         ? 'student_answer' 
         : 'instructor_answer';
@@ -304,6 +366,12 @@
         
       if (error) {
         console.error('Error submitting response:', error);
+        
+        // Check if it's an auth error and handle accordingly
+        if (error.code === '401' || error.message.includes('auth')) {
+          alert("Your session has expired. Please refresh the page to continue.");
+        }
+        
         return;
       }
       
@@ -356,6 +424,14 @@
     }
     
     try {
+      // Check session validity first
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session) {
+        console.error("Session error before endorsing:", sessionError);
+        alert("Your session has expired. Please refresh the page to continue.");
+        return;
+      }
+      
       const targetResponse = responses.find(r => r.id === responseId);
       if (!targetResponse) {
         return;
@@ -370,6 +446,12 @@
         
       if (error) {
         console.error('Error endorsing response:', error);
+        
+        // Check if it's an auth error
+        if (error.code === '401' || error.message.includes('auth')) {
+          alert("Your session has expired. Please refresh the page to continue.");
+        }
+        
         return;
       }
       
@@ -403,11 +485,18 @@
     }
     
     try {
+      // Check session validity first
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session) {
+        console.error("Session error before upvoting:", sessionError);
+        alert("Your session has expired. Please refresh the page to continue.");
+        return;
+      }
+      
       const targetResponse = responses.find(r => r.id === responseId);
       if (!targetResponse) {
         return;
       }
-
       // Check if user already upvoted
       const hasUpvoted = targetResponse.userUpvoted;
         
@@ -423,6 +512,12 @@
           
         if (deleteError) {
           console.error('Error removing upvote:', deleteError);
+          
+          // Check if it's an auth error
+          if (deleteError.code === '401' || deleteError.message.includes('auth')) {
+            alert("Your session has expired. Please refresh the page to continue.");
+          }
+          
           return;
         }
         
@@ -447,6 +542,12 @@
           
         if (insertError) {
           console.error('Error adding upvote:', insertError);
+          
+          // Check if it's an auth error
+          if (insertError.code === '401' || insertError.message.includes('auth')) {
+            alert("Your session has expired. Please refresh the page to continue.");
+          }
+          
           return;
         }
         
@@ -477,6 +578,15 @@
     commentSubmitting = true;
     
     try {
+      // Check session validity first
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session) {
+        console.error("Session error before commenting:", sessionError);
+        alert("Your session has expired. Please refresh the page to continue.");
+        commentSubmitting = false;
+        return;
+      }
+      
       const { data, error } = await supabase
         .from('comments')
         .insert({
@@ -489,6 +599,12 @@
         
       if (error) {
         console.error('Error submitting comment:', error);
+        
+        // Check if it's an auth error
+        if (error.code === '401' || error.message.includes('auth')) {
+          alert("Your session has expired. Please refresh the page to continue.");
+        }
+        
         return;
       }
       
@@ -533,23 +649,30 @@
         'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'p', 'a', 'ul', 'ol',
         'nl', 'li', 'b', 'i', 'strong', 'em', 'strike', 'code', 'hr', 'br', 'div',
         'table', 'thead', 'caption', 'tbody', 'tr', 'th', 'td', 'pre', 'img', 'span',
-        'del', 'ins', 'sup', 'sub'
+        'del', 'ins', 'sup', 'sub', 'mark', 'ruby', 'rt', 'rp', 'abbr', 'cite'
       ],
       ALLOWED_ATTR: [
-        'href', 'name', 'target', 'src', 'alt', 'class', 'id'
-      ]
+        'href', 'name', 'target', 'src', 'alt', 'class', 'id', 'style', 'title',
+        'lang', 'width', 'height', 'data-language'
+      ],
+      ALLOW_DATA_ATTR: true
     };
     
     try {
-      const parsed = marked(content, {
+      // Parse markdown with marked
+      const parsed = marked.parse(content, {
         gfm: true,
         breaks: true,
         smartLists: true
       });
-      return DOMPurify.sanitize(parsed, sanitizeOptions);
+      
+      // Sanitize the HTML
+      const sanitized = DOMPurify.sanitize(parsed, sanitizeOptions);
+      
+      return sanitized;
     } catch (error) {
       console.error('Error rendering markdown:', error);
-      return DOMPurify.sanitize(content);
+      return DOMPurify.sanitize(content, sanitizeOptions);
     }
   }
   
@@ -628,7 +751,7 @@
   }
   
   function getStatusBadge(status: string): { color: string, text: string, icon: string } {
-    switch (status) {
+    switch(status) {
       case 'answered':
         return {
           color: 'bg-green-100 text-green-700 hover:bg-green-200',
@@ -666,6 +789,85 @@
   }
 </script>
 
+<!-- Add these styles to properly handle code blocks and text overflow -->
+<style>
+  /* Make sure pre blocks don't overflow */
+  :global(pre) {
+    max-width: 100%;
+    overflow-x: auto;
+    padding: 1rem;
+    background-color: #1e1e1e;
+    border-radius: 0.375rem;
+    margin: 1rem 0;
+  }
+  
+  /* Code block styling */
+  :global(code) {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.875rem;
+    padding: 0.125rem 0.25rem;
+    border-radius: 0.25rem;
+  }
+  
+  :global(:not(pre) > code) {
+    background-color: rgba(0, 0, 0, 0.05);
+    color: #ef4444;
+    padding: 0.2em 0.4em;
+  }
+  
+  /* Handling long words and URLs */
+  :global(.prose p, .prose li) {
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    word-break: break-word;
+    hyphens: auto;
+  }
+  
+  /* Table styling */
+  :global(.prose table) {
+    width: 100%;
+    border-collapse: collapse;
+    overflow-x: auto;
+    display: block;
+  }
+  
+  :global(.prose th, .prose td) {
+    padding: 0.5rem;
+    border: 1px solid #e2e8f0;
+  }
+  
+  /* Highlight.js theme override */
+  :global(.hljs) {
+    background: #1e1e1e !important;
+    color: #dcdcdc !important;
+    border-radius: 0.375rem;
+  }
+  
+  :global(.hljs-keyword, .hljs-selector-tag, .hljs-tag) {
+    color: #569CD6 !important;
+  }
+  
+  :global(.hljs-attr, .hljs-name) {
+    color: #9CDCFE !important;
+  }
+  
+  :global(.hljs-string) {
+    color: #CE9178 !important;
+  }
+  
+  :global(.hljs-built_in, .hljs-builtin-name) {
+    color: #4EC9B0 !important;
+  }
+  
+  :global(.hljs-comment) {
+    color: #6A9955 !important;
+  }
+  
+  :global(.hljs-number) {
+    color: #B5CEA8 !important;
+  }
+</style>
+
 <div class="container mx-auto py-8 max-w-4xl px-4 sm:px-6">
   {#if loading}
     <div class="flex justify-center py-12">
@@ -686,31 +888,33 @@
     </div>
     
     <!-- Question Card -->
-    <!-- Question Card -->
-<Card class="mb-8 overflow-hidden shadow-sm">
-  <CardHeader class="pb-4 border-b bg-muted/20">
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-      <div class="flex items-center gap-2">
-        <span class="inline-block" innerHTML={getPostTypeIcon(post.post_type)}></span>
-        
-        {#if post.status}
-        {@const statusBadge = getStatusBadge(post.status)}
-        <Badge variant="outline" class={`flex items-center gap-1 ${statusBadge.color}`}>
-          <span innerHTML={statusBadge.icon}></span>
-          <span>{statusBadge.text}</span>
-        </Badge>
-      {/if}
-        
-        {#if post.folder_name}
-          <Badge variant="secondary" class="flex items-center gap-1">
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-            </svg>
-            <span>{post.folder_name}</span>
-          </Badge>
-        {/if}
-      </div>
+    <Card class="mb-8 overflow-hidden shadow-sm">
+      <CardHeader class="pb-4 border-b bg-muted/20">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <!-- Fix: Use proper svelte binding syntax for dynamic HTML -->
+            <span class="inline-block">
+              {@html getPostTypeIcon(post.post_type)}
+            </span>
+            
+            {#if post.status}
+            <Badge variant="outline" class={`flex items-center gap-1 ${getStatusBadge(post.status).color}`}>
+              <span>{@html getStatusBadge(post.status).icon}</span>
+              <span>{getStatusBadge(post.status).text}</span>
+            </Badge>
+          {/if}
           
+            
+            {#if post.folder_name}
+              <Badge variant="secondary" class="flex items-center gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span>{post.folder_name}</span>
+              </Badge>
+            {/if}
+          </div>
+              
           <div class="flex gap-2">
             <a href="/courses/{courseId}" class="inline-flex">
               <Button variant="ghost" size="sm" class="h-8 gap-1">
@@ -722,10 +926,10 @@
             </a>
           </div>
         </div>
-        
+            
         <CardTitle class="text-2xl mt-2">{post.title}</CardTitle>
       </CardHeader>
-      
+          
       <CardContent class="py-6">
         <div class="flex items-center gap-3 mb-4">
           <Avatar class="h-9 w-9 border">
@@ -734,10 +938,10 @@
             {/if}
             <AvatarFallback
               class={!post.anonymous && post.user?.role === 'instructor' 
-                ? 'bg-amber-100 text-amber-700' 
-                : !post.anonymous && post.user?.role === 'ta'
-                ? 'bg-purple-100 text-purple-700'
-                : 'bg-muted'
+                  ? 'bg-amber-100 text-amber-700' 
+                  : !post.anonymous && post.user?.role === 'ta'
+                  ? 'bg-purple-100 text-purple-700'
+                  : 'bg-muted'
               }
             >
               {post.anonymous ? 'A' : getInitials(post.user?.full_name)}
@@ -749,11 +953,11 @@
               <span>{post.anonymous ? 'Anonymous' : post.user?.full_name || 'User'}</span>
               {#if !post.anonymous && post.user?.role}
                 <Badge variant={post.user?.role === 'instructor' ? 'default' : 
-                  post.user?.role === 'ta' ? 'secondary' : 'outline'} 
-                  class="px-1.5 py-0 h-4 text-[10px] font-normal"
+                    post.user?.role === 'ta' ? 'secondary' : 'outline'} 
+                    class="px-1.5 py-0 h-4 text-[10px] font-normal"
                 >
                   {post.user?.role === 'instructor' ? 'Instructor' : 
-                    post.user?.role === 'ta' ? 'TA' : 'Student'}
+                      post.user?.role === 'ta' ? 'TA' : 'Student'}
                 </Badge>
               {/if}
             </div>
@@ -766,20 +970,20 @@
             </div>
           </div>
         </div>
-        
-        <div class="prose prose-stone dark:prose-invert max-w-none">
+            
+        <div class="prose prose-stone dark:prose-invert max-w-none break-words">
           {@html renderMarkdown(post.content)}
         </div>
       </CardContent>
     </Card>
-    
+        
     <!-- Responses Section -->
     <div class="mb-8">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
         <h2 class="text-xl font-semibold">
           {responses.length} {responses.length === 1 ? 'Response' : 'Responses'}
         </h2>
-        
+            
         <div class="flex items-center gap-2">
           <span class="text-sm text-muted-foreground">Sort by:</span>
           <div class="flex border rounded-md overflow-hidden">
@@ -826,7 +1030,7 @@
           </div>
         </div>
       </div>
-      
+          
       <!-- Responses List -->
       {#if responses.length > 0}
         <div class="space-y-4">
@@ -881,7 +1085,7 @@
               </CardHeader>
               
               <CardContent class="pb-3">
-                <div class="prose prose-stone dark:prose-invert max-w-none">
+                <div class="prose prose-stone dark:prose-invert max-w-none break-words">
                   {@html renderMarkdown(response.content)}
                 </div>
               </CardContent>
@@ -978,7 +1182,7 @@
                           </span>
                         </div>
                         <div class="pl-8">
-                          <p class="text-muted-foreground">{comment.content}</p>
+                          <p class="text-muted-foreground break-words">{comment.content}</p>
                         </div>
                       </div>
                     {/each}
@@ -1084,11 +1288,14 @@
                 class="resize-y min-h-[150px]"
                 disabled={submitting}
               />
+              <div class="mt-2 text-xs text-muted-foreground">
+                <strong>Tip:</strong> You can use Markdown to format your text. For code blocks, use ```python (or another language) to add syntax highlighting.
+              </div>
             </Tabs.Content>
             
             <Tabs.Content value="preview" class="pt-4 focus-visible:outline-none focus-visible:ring-0">
               {#if newResponse.trim()}
-                <div class="border rounded-md p-4 min-h-[150px] prose prose-stone dark:prose-invert max-w-none">
+                <div class="border rounded-md p-4 min-h-[150px] prose prose-stone dark:prose-invert max-w-none break-words">
                   {@html renderMarkdown(newResponse)}
                 </div>
               {:else}

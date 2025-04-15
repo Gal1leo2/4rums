@@ -13,6 +13,7 @@
   import { Checkbox } from '$lib/components/ui/checkbox';
   import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert';
   import { X, Plus, AlertCircle } from 'lucide-svelte';
+  import { withSessionRefresh } from '$lib/auth/session-handler';
 
   // TypeScript interfaces
   interface Course {
@@ -135,52 +136,84 @@
     tags = tags.filter(t => t !== tag);
   }
   
-  async function submitPost(): Promise<void> {
-    if (!title.trim() || !content.trim() || !$user) {
-      error = 'Please fill in all required fields';
+// Updated submitPost function with session refresh handling
+async function submitPost(): Promise<void> {
+  console.log("1. submitPost function called");
+  
+  if (!title.trim() || !content.trim() || !$user) {
+    console.log("2. Validation failed", { title: !!title.trim(), content: !!content.trim(), user: !!$user });
+    error = 'Please fill in all required fields';
+    return;
+  }
+  
+  console.log("3. Validation passed");
+  submitting = true;
+  error = '';
+  
+  try {
+    console.log("4. Checking post type permissions");
+    // Only instructors and TAs can create announcements
+    if (postType === 'announcement' && userRole !== 'instructor' && userRole !== 'ta') {
+      console.log("5. Announcement permission check failed");
+      error = 'Only instructors and TAs can create announcements';
       return;
     }
     
-    submitting = true;
-    error = '';
+    // Skip session checks entirely and go straight to the API call
+    console.log("5.5. Using user data from store");
+    console.log("6. Sending post to API...");
     
-    try {
-      // Only instructors and TAs can create announcements
-      if (postType === 'announcement' && userRole !== 'instructor' && userRole !== 'ta') {
-        error = 'Only instructors and TAs can create announcements';
-        submitting = false;
-        return;
-      }
-      
-      const { data, error: postError } = await supabase
-        .from('posts')
-        .insert({
-          course_id: courseId,
-          user_id: $user.id,
-          title,
-          content,
-          post_type: postType,
-          is_private: isPrivate,
-          anonymous: isAnonymous,
-          folder_id: selectedFolder || null,
-          tags: tags.length > 0 ? tags : null
-        })
-        .select();
-        
-      if (postError) {
-        console.error('Error creating post:', postError);
-        error = 'Failed to create post. Please try again.';
-      } else if (data && data.length > 0) {
-        // Redirect to the new post
-        goto(`/courses/${courseId}/posts/${data[0].id}`);
-      }
-    } catch (err) {
-      console.error('Unexpected error submitting post:', err);
-      error = 'An unexpected error occurred while creating your post';
-    } finally {
-      submitting = false;
+    // Create a timeout promise to catch hanging operations
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Operation timed out')), 10000);
+    });
+    
+    const databasePromise = supabase
+      .from('posts')
+      .insert({
+        course_id: courseId,
+        user_id: $user.id,
+        title,
+        content,
+        post_type: postType,
+        is_private: isPrivate,
+        anonymous: isAnonymous,
+        folder_id: selectedFolder || null,
+        tags: tags.length > 0 ? tags : null
+      })
+      .select();
+    
+    // Race the database operation against the timeout
+    const { data, error: postError } = await Promise.race([
+      databasePromise,
+      timeoutPromise.then(() => {
+        console.error('Database operation timed out');
+        throw new Error('Database operation timed out');
+      })
+    ]);
+    
+    console.log("7. API response received", { data: !!data, error: !!postError });
+    
+    if (postError) {
+      console.error('Error creating post:', postError);
+      error = 'Failed to create post. Please try again.';
+    } else if (data && data.length > 0) {
+      console.log("8. Redirecting to new post");
+      // Redirect to the new post
+      goto(`/courses/${courseId}/posts/${data[0].id}`);
     }
+  } catch (err) {
+    console.error('9. Error caught:', err);
+    error = 'An unexpected error occurred while creating your post';
+    
+    if (err instanceof Error && err.message.includes('timed out')) {
+      error = 'The operation timed out. Please try again or refresh the page.';
+    }
+  } finally {
+    console.log("10. Finally block - setting submitting to false");
+    submitting = false;
   }
+}
 
   function handleKeydown(e: KeyboardEvent): void {
     if (e.key === 'Enter') {
@@ -282,9 +315,9 @@
               <Input 
                 placeholder="Add a tag" 
                 bind:value={newTag}
-                on:keydown={handleKeydown}
+                onkeydown={handleKeydown}
               />
-              <Button type="button" variant="outline" on:click={addTag} disabled={tags.length >= 5}>
+              <Button type="button" variant="outline" onclick={addTag} disabled={tags.length >= 5}>
                 <Plus class="h-4 w-4" />
               </Button>
             </div>

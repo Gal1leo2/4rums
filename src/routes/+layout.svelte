@@ -3,9 +3,11 @@
     import '../app.css';
     import { onMount, onDestroy } from 'svelte';
     import { page } from '$app/stores';
+    import 'highlight.js/styles/github-dark.css';
     import { goto, afterNavigate, beforeNavigate } from '$app/navigation';
-    import { initAuth } from '$lib/stores/auth';
-    
+    import { initAuth, user } from '$lib/stores/auth';
+    import SessionKeeper from '$lib/components/SessionKeeper.svelte';
+
     let { children } = $props();
     let currentPath = '';
   
@@ -62,5 +64,8 @@
         }
     });
 </script>
+{#if $user}
+    <SessionKeeper refreshInterval={5 * 60 * 1000} />
+{/if}
 
 {@render children()}
