@@ -231,6 +231,7 @@ export async function signInWithGoogle(redirectTo = '/courses') {
     }
     
     console.log(`[Tab ${tabId}] Google sign in flow initiated`);
+    
     return { success: true };
   } catch (error) {
     console.error(`[Tab ${tabId}] Exception during Google sign in:`, error);
