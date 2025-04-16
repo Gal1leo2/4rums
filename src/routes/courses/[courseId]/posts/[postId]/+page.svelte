@@ -13,7 +13,6 @@
   import { Checkbox } from '$lib/components/ui/checkbox';
   import * as Tabs from "$lib/components/ui/tabs";
   import * as AlertDialog from "$lib/components/ui/alert-dialog";
-  import { withSessionRefresh } from '$lib/auth/session-handler';
   
   // Import markdown parser with syntax highlighting
   import { marked } from 'marked';
