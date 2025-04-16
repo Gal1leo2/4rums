@@ -1,51 +1,70 @@
 <!-- src/routes/auth/callback/+page.svelte -->
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { goto } from '$app/navigation';
-  import { page } from '$app/stores';
-  import { supabase } from '$lib/supabase/client';
-
-  onMount(async () => {
-    // Get redirect URL from query params or default to courses
-    const redirectTo = $page.url.searchParams.get('redirectTo') || '/courses';
-
-    try {
-      // Exchange the auth code for a session
-      const { data, error } = await supabase.auth.getSession();
+    import { onMount } from 'svelte';
+    import { page } from '$app/stores';
+    import { supabase } from '$lib/supabase/client';
+    
+    let message = "Completing sign in...";
+    let loading = true;
+    
+    onMount(async () => {
+      const redirectTo = $page.url.searchParams.get('redirectTo') || '/courses';
       
-      if (error) {
-        console.error('Error in auth callback:', error);
-        goto('/auth/login?error=Authentication%20failed');
-        return;
-      }
-      
-      if (!data.session) {
-        // If no session yet, try to get it from URL (OAuth callback)
-        const { error: urlError } = await supabase.auth.getSessionFromUrl();
-        
-        if (urlError) {
-          console.error('Error getting session from URL:', urlError);
-          goto('/auth/login?error=Authentication%20failed');
-          return;
+      // Give Supabase a moment to process authentication
+      setTimeout(async () => {
+        try {
+          // Check if user has a session
+          const { data: sessionData } = await supabase.auth.getSession();
+          
+          if (sessionData?.session) {
+            // User is authenticated with Supabase, now check if they exist in the users table
+            const { data: userData, error: userError } = await supabase
+              .from('users')
+              .select('id')
+              .eq('id', sessionData.session.user.id)
+              .maybeSingle();
+            
+            if (userError) {
+              console.error("Error checking user record:", userError);
+            }
+            
+            // If user doesn't exist in the database, redirect to unauthorized page
+            if (!userData) {
+              console.log("User authenticated but not in database, redirecting to unauthorized");
+              window.location.href = '/auth/unauth?reason=User+not+found+in+database';
+              return;
+            }
+            
+            // User is fully authorized, redirect to the requested page
+            window.location.href = redirectTo;
+          } else {
+            // No session found, redirect to login
+            message = "Authentication failed. Redirecting to login...";
+            setTimeout(() => {
+              window.location.href = '/auth/login?error=No+session+found';
+            }, 1000);
+          }
+        } catch (error) {
+          console.error("Error in auth callback:", error);
+          message = "An error occurred. Redirecting to login...";
+          setTimeout(() => {
+            window.location.href = '/auth/login?error=Authentication+error';
+          }, 1000);
+        } finally {
+          loading = false;
         }
-      }
-      
-      // At this point auth state change listeners will update the app
-      // Just redirect to the destination
-      goto(redirectTo);
-    } catch (error) {
-      console.error('Exception in auth callback:', error);
-      goto('/auth/login?error=Authentication%20error');
-    }
-  });
-</script>
-
-<div class="flex min-h-screen items-center justify-center">
-  <div class="text-center">
-    <h2 class="text-xl font-medium mb-2">Completing sign in...</h2>
-    <p class="text-muted-foreground">Please wait while we redirect you.</p>
-    <div class="mt-4 flex justify-center">
-      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      }, 500); // Short delay to let Supabase process the auth
+    });
+  </script>
+  
+  <div class="flex min-h-screen items-center justify-center">
+    <div class="text-center">
+      <h2 class="text-xl font-medium mb-2">{message}</h2>
+      <p class="text-muted-foreground">Please wait while we process your sign in.</p>
+      {#if loading}
+        <div class="mt-4 flex justify-center">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      {/if}
     </div>
   </div>
-</div>

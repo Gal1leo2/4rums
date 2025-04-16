@@ -1,7 +1,8 @@
 <!-- src/routes/auth/login/+page.svelte -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from "$app/navigation";
-  import { page } from "$app/stores";
+  import { browser } from '$app/environment';
   import { signInWithEmail, signInWithGoogle } from "$lib/stores/auth";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
@@ -10,6 +11,9 @@
   import { Alert, AlertDescription } from "$lib/components/ui/alert";
   import { Separator } from "$lib/components/ui/separator";
 
+  // Export page data properties
+  export let data;
+
   let email = '';
   let password = '';
   let loading = false;
@@ -17,8 +21,20 @@
   let error = '';
   let showPassword = false;
 
-  // Get redirect URL from query params
-  const redirectTo = $page.url.searchParams.get('redirect') || '/courses';
+  // Get redirect URL from data or default to courses
+  const redirectTo = browser ? 
+    (new URLSearchParams(window.location.search).get('redirect') || data.redirectTo || '/courses') : 
+    '/courses';
+  
+  // Initialize with error parameter if present
+  onMount(() => {
+    if (browser) {
+      const urlError = new URLSearchParams(window.location.search).get('error');
+      if (urlError) {
+        error = decodeURIComponent(urlError);
+      }
+    }
+  });
 
   async function handleLogin() {
     if (!email || !password) {
@@ -43,6 +59,15 @@
   async function handleGoogleLogin() {
     googleLoading = true;
     error = '';
+    
+    // Store redirect in localStorage for backup
+    if (browser) {
+      try {
+        localStorage.setItem('auth_redirect', redirectTo);
+      } catch (e) {
+        console.error('Failed to save redirect to localStorage:', e);
+      }
+    }
     
     const result = await signInWithGoogle(redirectTo);
     
@@ -88,7 +113,7 @@
     <Button 
       variant="outline" 
       class="w-full mb-4 flex items-center justify-center gap-2" 
-      on:click={handleGoogleLogin}
+      onclick={handleGoogleLogin}
       disabled={googleLoading}
     >
       {#if googleLoading}
