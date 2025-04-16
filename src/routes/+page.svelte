@@ -58,7 +58,7 @@
         <div class="flex gap-6">
           <a href="/about" class="text-sm text-gray-500 hover:text-gray-900">About</a>
           <a href="/privacy" class="text-sm text-gray-500 hover:text-gray-900">Privacy</a>
-          <a href="/" class="text-sm text-gray-500 hover:text-gray-900">Report Problem</a>
+          <a href="https://forms.gle/tCyQ1JZSfr9BmtCY8" class="text-sm text-gray-500 hover:text-gray-900">Report Problem</a>
         </div>
       </div>
     </div>
