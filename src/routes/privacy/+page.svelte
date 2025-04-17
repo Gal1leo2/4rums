@@ -80,7 +80,7 @@
   
       <AccordionItem value="item-3">
         <AccordionTrigger>
-          <h2 class="text-xl font-semibold">How We Collect Your Personal Data</h2>
+          <h2 class="text-xl font-semibold text-left">How We Collect Your Personal Data</h2>
         </AccordionTrigger>
         <AccordionContent>
           <p class="mb-4">We use different methods to collect data from and about you including through:</p>
