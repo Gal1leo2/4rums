@@ -65,6 +65,7 @@
 	let course: CourseData | null = null;
 	let searchQuery: string = '';
 	let userRole: string = '';
+	let useraff: string = '';
 	let currentTab: string = 'all';
 	let currentFolder: string | null = null;
 	let expandedFolders: Set<string> = new Set();
@@ -240,6 +241,18 @@
 		} else if (memberData) {
 			userRole = memberData.role;
 			console.log('User role:', userRole);
+		}
+		// Get user's affiliation
+		const { data: userAffData, error: userAffError } = await supabase
+			.from('users')
+			.select('affiliation')
+			.eq('id', currentUser.id)
+			.single();
+		if (userAffError) {
+			console.error('Error fetching user affiliation:', userAffError);
+		} else if (userAffData) {
+			useraff = userAffData.affiliation;
+			console.log('User affiliation:', useraff);
 		}
 
 		// Load posts data
@@ -561,6 +574,9 @@
 							>
 								<span class="mr-1">👤</span>
 								{$user.full_name}
+							</Badge>
+							<Badge variant="secondary" class="select-none px-3 text-sm capitalize text-blue-800">
+								{useraff}
 							</Badge>
 						{/if}
 						{#if userRole && userRole.trim() !== ''}

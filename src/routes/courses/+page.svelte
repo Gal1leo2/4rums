@@ -9,6 +9,7 @@
   import { Separator } from '$lib/components/ui/separator';
   import { Alert, AlertDescription, AlertTitle } from '$lib/components/ui/alert';
   import { Tabs, TabsContent, TabsList, TabsTrigger } from '$lib/components/ui/tabs';
+  import RandomGreeting from '$lib/components/RandomGreeting.svelte';
   
   // Define TypeScript interfaces
   interface Course {
@@ -26,8 +27,7 @@
     validEntries: any | null;
     error: Error | null;
   }
-  let userRole: string = '';
-  // State variables with types
+  let userFullName: string = '';
   let activeCourses: Course[] = [];
   let inactiveCourses: Course[] = [];
   let loading: boolean = true;
@@ -53,6 +53,7 @@
     // Use the $user store that's already available
     if ($user) {
       console.log("User found in store:", $user.id);
+      userFullName = $user.full_name
       await loadCourses($user.id);
     } else {
       console.log("No user found in store, checking session directly");
@@ -62,12 +63,14 @@
       
       if (data.session) {
         console.log("Session found directly:", data.session.user.id);
+        userFullName = data.session.user.user_metadata.full_name || 'User';
         await loadCourses(data.session.user.id);
       } else {
         console.log("No authenticated user found");
         loading = false;
       }
     }
+
   });
   
   async function loadCourses(userId: string): Promise<void> {
@@ -121,7 +124,6 @@
       
       console.log('Raw course data:', data);
       debugInfo.rawData = data;
-      userRole = data.role;
       
       // Process the data - handle empty results correctly
       const validEntries = data ? data.filter(item => item && item.courses) : [];
@@ -221,7 +223,8 @@
     if (termLower.includes('winter')) return '❄️';
     return '📚';
   }
-  
+
+
   // Get random color for course cards based on course code
   function getCardColor(code: string | undefined, isActive: boolean): string {
     if (!isActive) {
@@ -272,8 +275,12 @@
   <!-- Header Section with Search and Filters -->
   <div class="flex flex-col lg:flex-row justify-between items-start gap-4 mb-8">
     <div class="space-y-2">
-      <div class="flex items-center gap-3">
-        <h1 class="text-3xl font-bold">My Courses</h1>
+      <div class="flex flex-col items-start gap-3"> <!-- Use items-start instead of items-center -->
+        <h1 class="text-xl font-bold">
+          <RandomGreeting userName={userFullName} />
+        </h1>
+        <h1 class="text-3xl font-bold">My Courses</h1> <!-- Removed text-left as it's already handled by items-start -->
+        
         {#if !loading && (activeCourses.length > 0 || inactiveCourses.length > 0)}
           <Badge variant="outline" class="py-1.5 px-3 flex items-center gap-1.5 bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500">
