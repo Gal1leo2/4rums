@@ -38,12 +38,6 @@
         {/if}
       </div>
     </div>
-    
-    <!-- Features Section -->
-    
-    
-    <!-- CTA Section -->
-
   </div>
   
   <!-- Footer -->

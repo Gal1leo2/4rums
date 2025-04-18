@@ -48,7 +48,6 @@
 	let error: string = '';
 	let userRole: string = '';
 
-
 	onMount(async () => {
 		// Track whether we've seen an auth event since page load
 		let hadAuthStateChange = false;

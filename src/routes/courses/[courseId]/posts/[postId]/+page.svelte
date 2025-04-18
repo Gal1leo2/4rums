@@ -55,7 +55,6 @@
 		id: string;
 		full_name: string;
 		role?: string;
-		avatar_url?: string;
 	}
 
 	interface CourseData {
@@ -123,7 +122,7 @@
 	let previewMode: boolean = false;
 	let endorseConfirmOpen: boolean = false;
 	let responseToEndorse: ResponseData | null = null;
-	let sortOption: 'newest' | 'oldest' | 'endorsed' | 'upvotes' = 'newest';
+	let sortOption: 'newest' | 'oldest' | 'endorsed' | 'upvotes' = 'oldest';
 	let sessionCheckInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Session check to avoid expired token issues
@@ -182,23 +181,23 @@
 			}
 
 			// Get post author info
-// Get post author info
-console.log("Post anonymous status:", postData.anonymous, typeof postData.anonymous);
-console.log("Post user_id:", postData.user_id);
+			// Get post author info
+			console.log('Post anonymous status:', postData.anonymous, typeof postData.anonymous);
+			console.log('Post user_id:', postData.user_id);
 
-if (!postData.anonymous) {
-    const { data: userData, error: userError } = await supabase
-        .from('users')
-        .select('id, full_name, role')
-        .eq('id', postData.user_id)
-        .single();
-    
-    console.log("User data fetch result:", userData, userError);
+			if (!postData.anonymous) {
+				const { data: userData, error: userError } = await supabase
+					.from('users')
+					.select('id, full_name, role')
+					.eq('id', postData.user_id)
+					.single();
 
-    if (!userError && userData) {
-        postData.user = userData;
-    }
-}
+				console.log('User data fetch result:', userData, userError);
+
+				if (!userError && userData) {
+					postData.user = userData;
+				}
+			}
 			// Get folder info if available
 			if (postData.folder_id) {
 				const { data: folderData, error: folderError } = await supabase
@@ -231,7 +230,7 @@ if (!postData.anonymous) {
 						if (!response.anonymous) {
 							const { data: userData, error: userError } = await supabase
 								.from('users')
-								.select('id, full_name, role, avatar_url')
+								.select('id, full_name, role')
 								.eq('id', response.user_id)
 								.single();
 
@@ -265,17 +264,39 @@ if (!postData.anonymous) {
 						}
 
 						// Get comments
+						// Get comments
 						const { data: comments, error: commentsError } = await supabase
 							.from('comments')
-							.select('*, users!comments_user_id_fkey(id, full_name, role, avatar_url)')
+							.select('*')
 							.eq('response_id', response.id)
 							.order('created_at', { ascending: true });
 
-						if (comments) {
-							response.comments = comments.map((comment) => ({
-								...comment,
-								users: comment.users as unknown as UserData
-							})) as CommentData[];
+						if (commentsError) {
+							console.error('Error loading comments:', commentsError);
+							response.comments = [];
+						} else if (comments) {
+							// Fetch user data for each comment
+							const enhancedComments = await Promise.all(
+								comments.map(async (comment) => {
+									if (!comment.anonymous) {
+										const { data: userData, error: userError } = await supabase
+											.from('users')
+											.select('id, full_name, role') // No avatar_url
+											.eq('id', comment.user_id)
+											.single();
+
+										if (!userError && userData) {
+											return {
+												...comment,
+												users: userData
+											};
+										}
+									}
+									return comment;
+								})
+							);
+
+							response.comments = enhancedComments as CommentData[];
 						} else {
 							response.comments = [];
 						}
@@ -407,8 +428,7 @@ if (!postData.anonymous) {
 						? {
 								id: $user.id,
 								full_name: $user.full_name || 'User',
-								role: currentUserRole,
-								avatar_url: $user.avatar_url
+								role: currentUserRole
 							}
 						: undefined,
 					upvote_count: 0,
@@ -648,8 +668,7 @@ if (!postData.anonymous) {
 						: {
 								id: $user.id,
 								full_name: $user.full_name || 'User',
-								role: currentUserRole,
-								avatar_url: $user.avatar_url
+								role: currentUserRole
 							}
 				};
 
@@ -983,25 +1002,27 @@ if (!postData.anonymous) {
 			<CardContent class="py-6">
 				<div class="mb-4 flex items-center gap-3">
 					<Avatar class="h-9 w-9 border">
-						{#if !post.anonymous && post.user}
-						<AvatarImage src={post.user.avatar_url} alt={post.user.full_name} />
-						{/if}
 						<AvatarFallback
-						class={post.anonymous !== true && post.user?.role === 'instructor'
-						  ? 'bg-amber-100 text-amber-700'
-						  : post.anonymous !== true && post.user?.role === 'ta'
-							? 'bg-purple-100 text-purple-700'
-							: 'bg-muted'}
-					  >
-						{post.anonymous === true ? 'A' : (post.user ? getInitials(post.user.full_name) : 'U')}
-					  </AvatarFallback>
+							class={post.anonymous !== true && post.user?.role === 'instructor'
+								? 'bg-amber-100 text-amber-700'
+								: post.anonymous !== true && post.user?.role === 'ta'
+									? 'bg-purple-100 text-purple-700'
+									: 'bg-muted'}
+						>
+							{post.anonymous === true ? 'A' : post.user ? getInitials(post.user.full_name) : 'U'}
+						</AvatarFallback>
 					</Avatar>
 
 					<div>
 						<div class="flex items-center gap-1 text-sm font-medium">
 							<span>
-								{post.anonymous ? 'Anonymous' : (post.user ? post.user.full_name : `User (ID: ${post.user_id})`)}
-							  </span>							{#if !post.anonymous && post.user?.role}
+								{post.anonymous
+									? 'Anonymous'
+									: post.user
+										? post.user.full_name
+										: `User (ID: ${post.user_id})`}
+							</span>
+							{#if !post.anonymous && post.user?.role}
 								<Badge
 									variant={post.user?.role === 'instructor'
 										? 'default'
@@ -1097,9 +1118,6 @@ if (!postData.anonymous) {
 							<CardHeader class="flex flex-row items-start justify-between pb-3">
 								<div class="flex items-center gap-3">
 									<Avatar class="h-9 w-9 border">
-										{#if !response.anonymous && response.user?.avatar_url}
-											<AvatarImage src={response.user.avatar_url} alt={response.user.full_name} />
-										{/if}
 										<AvatarFallback
 											class={!response.anonymous && response.user?.role === 'instructor'
 												? 'bg-amber-100 text-amber-700'
@@ -1306,12 +1324,6 @@ if (!postData.anonymous) {
 											<div class="text-sm">
 												<div class="mb-1 flex items-center gap-2">
 													<Avatar class="h-6 w-6">
-														{#if !comment.anonymous && comment.users?.avatar_url}
-															<AvatarImage
-																src={comment.users.avatar_url}
-																alt={comment.users.full_name}
-															/>
-														{/if}
 														<AvatarFallback class="text-xs">
 															{comment.anonymous ? 'A' : getInitials(comment.users?.full_name)}
 														</AvatarFallback>
