@@ -182,18 +182,23 @@
 			}
 
 			// Get post author info
-			if (!postData.anonymous) {
-				const { data: userData, error: userError } = await supabase
-					.from('users')
-					.select('id, full_name, role, avatar_url')
-					.eq('id', postData.user_id)
-					.single();
+// Get post author info
+console.log("Post anonymous status:", postData.anonymous, typeof postData.anonymous);
+console.log("Post user_id:", postData.user_id);
 
-				if (!userError && userData) {
-					postData.user = userData;
-				}
-			}
+if (!postData.anonymous) {
+    const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('id, full_name, role')
+        .eq('id', postData.user_id)
+        .single();
+    
+    console.log("User data fetch result:", userData, userError);
 
+    if (!userError && userData) {
+        postData.user = userData;
+    }
+}
 			// Get folder info if available
 			if (postData.folder_id) {
 				const { data: folderData, error: folderError } = await supabase
@@ -978,24 +983,25 @@
 			<CardContent class="py-6">
 				<div class="mb-4 flex items-center gap-3">
 					<Avatar class="h-9 w-9 border">
-						{#if !post.anonymous && post.user?.avatar_url}
-							<AvatarImage src={post.user.avatar_url} alt={post.user.full_name} />
+						{#if !post.anonymous && post.user}
+						<AvatarImage src={post.user.avatar_url} alt={post.user.full_name} />
 						{/if}
 						<AvatarFallback
-							class={!post.anonymous && post.user?.role === 'instructor'
-								? 'bg-amber-100 text-amber-700'
-								: !post.anonymous && post.user?.role === 'ta'
-									? 'bg-purple-100 text-purple-700'
-									: 'bg-muted'}
-						>
-							{post.anonymous ? 'A' : getInitials(post.user?.full_name) }
-						</AvatarFallback>
+						class={post.anonymous !== true && post.user?.role === 'instructor'
+						  ? 'bg-amber-100 text-amber-700'
+						  : post.anonymous !== true && post.user?.role === 'ta'
+							? 'bg-purple-100 text-purple-700'
+							: 'bg-muted'}
+					  >
+						{post.anonymous === true ? 'A' : (post.user ? getInitials(post.user.full_name) : 'U')}
+					  </AvatarFallback>
 					</Avatar>
 
 					<div>
 						<div class="flex items-center gap-1 text-sm font-medium">
-							<span>{post.anonymous ? 'Anonymous' : post.user?.full_name || 'User'}</span>
-							{#if !post.anonymous && post.user?.role}
+							<span>
+								{post.anonymous ? 'Anonymous' : (post.user ? post.user.full_name : `User (ID: ${post.user_id})`)}
+							  </span>							{#if !post.anonymous && post.user?.role}
 								<Badge
 									variant={post.user?.role === 'instructor'
 										? 'default'
