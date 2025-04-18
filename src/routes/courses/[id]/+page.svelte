@@ -195,56 +195,56 @@
 		}
 	}
 	onMount(async () => {
-    // First, ensure we have authentication
-    let currentUser = $user;
-    
-    if (!currentUser) {
-        console.log('No user in store, checking session');
-        // Try to get session data directly
-        const { data } = await supabase.auth.getSession();
+		// First, ensure we have authentication
+		let currentUser = $user;
 
-        if (!data.session) {
-            console.log('No authenticated user found, redirecting to login');
-            const currentPath = window.location.pathname;
-            window.location.href = `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
-            return; // Stop further execution
-        }
-        
-        // Important: Wait for auth initialization to complete and update the user store
-        console.log('Session found, ensuring user data is loaded');
-        await ensureAuthenticated(); // Use the new function from updated auth.ts
-        
-        // Get the updated user value after initialization
-        currentUser = $user;
-        
-        // Still no user? Something went wrong
-        if (!currentUser) {
-            console.log('Failed to load user data');
-            return;
-        }
-    }
-    
-    // Now we definitely have user data, proceed
-    console.log('User authenticated:', currentUser.id);
-    
-    // Get user's role in this course
-    const { data: memberData, error: memberError } = await supabase
-        .from('course_members')
-        .select('role')
-        .eq('course_id', courseId)
-        .eq('user_id', currentUser.id)
-        .single();
+		if (!currentUser) {
+			console.log('No user in store, checking session');
+			// Try to get session data directly
+			const { data } = await supabase.auth.getSession();
 
-    if (memberError) {
-        console.error('Error fetching role:', memberError);
-    } else if (memberData) {
-        userRole = memberData.role;
-        console.log('User role:', userRole);
-    }
-    
-    // Load posts data
-    await loadCourseAndPosts();
-});
+			if (!data.session) {
+				console.log('No authenticated user found, redirecting to login');
+				const currentPath = window.location.pathname;
+				window.location.href = `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
+				return; // Stop further execution
+			}
+
+			// Important: Wait for auth initialization to complete and update the user store
+			console.log('Session found, ensuring user data is loaded');
+			await ensureAuthenticated(); // Use the new function from updated auth.ts
+
+			// Get the updated user value after initialization
+			currentUser = $user;
+
+			// Still no user? Something went wrong
+			if (!currentUser) {
+				console.log('Failed to load user data');
+				return;
+			}
+		}
+
+		// Now we definitely have user data, proceed
+		console.log('User authenticated:', currentUser.id);
+
+		// Get user's role in this course
+		const { data: memberData, error: memberError } = await supabase
+			.from('course_members')
+			.select('role')
+			.eq('course_id', courseId)
+			.eq('user_id', currentUser.id)
+			.single();
+
+		if (memberError) {
+			console.error('Error fetching role:', memberError);
+		} else if (memberData) {
+			userRole = memberData.role;
+			console.log('User role:', userRole);
+		}
+
+		// Load posts data
+		await loadCourseAndPosts();
+	});
 	async function searchPosts(): Promise<void> {
 		loading = true;
 
@@ -554,9 +554,18 @@
 							>
 							{course.term}
 						</Badge>
+						{#if $user}
+							<Badge
+								variant="outline"
+								class="border-blue-200 bg-blue-50 px-3 text-sm text-blue-700"
+							>
+								<span class="mr-1">👤</span>
+								{$user.full_name}
+							</Badge>
+						{/if}
 						{#if userRole && userRole.trim() !== ''}
 							<Badge variant="secondary" class="select-none px-3 text-sm capitalize">
-								{userRole}
+								{userRole.toUpperCase()}
 							</Badge>
 						{/if}
 						{#if course.is_active}
@@ -684,9 +693,60 @@
 			<!-- Sidebar with folders -->
 			<div class="col-span-12 space-y-4 md:col-span-3">
 				<!-- Search box - this appears to be working fine -->
-				<form on:submit|preventDefault={handleSearch}>
-					<!-- Search box content unchanged -->
-				</form>
+				<!-- Search box -->
+				<div class="relative">
+					<div class="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="16"
+							height="16"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							class="text-muted-foreground"
+						>
+							<circle cx="11" cy="11" r="8"></circle>
+							<path d="m21 21-4.3-4.3"></path>
+						</svg>
+					</div>
+
+					<input
+						type="text"
+						bind:value={searchQuery}
+						on:input={searchPosts}
+						placeholder="Search posts..."
+						class="w-full rounded-md border py-2 pl-10 pr-4 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-primary"
+					/>
+
+					{#if searchQuery}
+						<button
+							class="absolute inset-y-0 right-3 flex items-center text-muted-foreground hover:text-foreground"
+							on:click={() => {
+								searchQuery = '';
+								setCurrentView(currentTab, currentFolder);
+							}}
+							aria-label="Clear search"
+						>
+							<svg
+								xmlns="http://www.w3.org/2000/svg"
+								width="16"
+								height="16"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							>
+								<path d="M18 6 6 18"></path>
+								<path d="m6 6 12 12"></path>
+							</svg>
+						</button>
+					{/if}
+				</div>
 
 				<!-- Content type filters -->
 				<Card class="overflow-hidden">
@@ -709,7 +769,6 @@
 						</CardTitle>
 					</CardHeader>
 					<CardContent class="space-y-1 p-2">
-						<!-- Replace Button components with regular buttons -->
 						<button
 							type="button"
 							class={`flex h-9 w-full items-center justify-between rounded-md px-3 py-1.5 text-sm transition-colors ${
@@ -883,7 +942,7 @@
 											class="flex flex-1 cursor-pointer items-center gap-2 overflow-hidden border-0 bg-transparent p-0 text-left"
 											on:click={() => handleFolderChange(folder.id)}
 										>
-											<span innerHTML={getFolderIcon(folder.name)}></span>
+											<span>{@html getFolderIcon(folder.name)}</span>
 											<span class="truncate">{folder.name}</span>
 										</button>
 										<div class="flex items-center gap-2">
@@ -903,6 +962,9 @@
 													event.stopPropagation();
 													toggleFolder(folder.id);
 												}}
+												aria-label={expandedFolders.has(folder.id)
+													? 'Collapse folder'
+													: 'Expand folder'}
 											>
 												<svg
 													xmlns="http://www.w3.org/2000/svg"
@@ -988,11 +1050,11 @@
 						<div class="flex items-center justify-between">
 							<CardTitle class="flex items-center gap-2">
 								{#if currentFolder}
-									<span
-										innerHTML={getFolderIcon(
+									<span>
+										{@html getFolderIcon(
 											folders.find((f) => f.id === currentFolder)?.name || 'Folder'
 										)}
-									></span>
+									</span>
 									{folders.find((f) => f.id === currentFolder)?.name || 'Posts'}
 								{:else if currentTab === 'questions'}
 									<svg
@@ -1072,30 +1134,32 @@
 
 							{#if searchQuery}
 								<Badge variant="secondary" class="flex gap-1 px-3 py-1">
-									<span>Search: {searchQuery}</span>
-									<button
-										class="opacity-70 hover:opacity-100"
-										type="button"
-										on:click={() => {
-											searchQuery = '';
-											setCurrentView(currentTab, currentFolder);
-										}}
-									>
-										<svg
-											xmlns="http://www.w3.org/2000/svg"
-											width="14"
-											height="14"
-											viewBox="0 0 24 24"
-											fill="none"
-											stroke="currentColor"
-											stroke-width="2"
-											stroke-linecap="round"
-											stroke-linejoin="round"
+									<form on:submit|preventDefault={handleSearch}>
+										<span>Search: {searchQuery}</span>
+										<button
+											class="opacity-70 hover:opacity-100"
+											type="button"
+											on:click={() => {
+												searchQuery = '';
+												setCurrentView(currentTab, currentFolder);
+											}}
 										>
-											<path d="M18 6 6 18"></path>
-											<path d="m6 6 12 12"></path>
-										</svg>
-									</button>
+											<svg
+												xmlns="http://www.w3.org/2000/svg"
+												width="14"
+												height="14"
+												viewBox="0 0 24 24"
+												fill="none"
+												stroke="currentColor"
+												stroke-width="2"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+											>
+												<path d="M18 6 6 18"></path>
+												<path d="m6 6 12 12"></path>
+											</svg>
+										</button>
+									</form>
 								</Badge>
 							{/if}
 						</div>
@@ -1178,11 +1242,11 @@
 											<line x1="12" y1="17" x2="12.01" y2="17"></line>
 										</svg>
 									{:else if currentFolder}
-										<span
-											innerHTML={getFolderIcon(
+										<span>
+											{@html getFolderIcon(
 												folders.find((f) => f.id === currentFolder)?.name || 'Folder'
 											)}
-										></span>
+										</span>
 									{:else}
 										<svg
 											xmlns="http://www.w3.org/2000/svg"
@@ -1209,7 +1273,7 @@
 									</p>
 									<Button
 										variant="outline"
-										on:click={() => {
+										onclick={() => {
 											searchQuery = '';
 											setCurrentView(currentTab, currentFolder);
 										}}
@@ -1222,7 +1286,7 @@
 										This folder doesn't contain any posts yet
 									</p>
 									<div class="flex gap-2">
-										<Button variant="outline" on:click={() => handleFolderChange(null)}>
+										<Button variant="outline" onclick={() => handleFolderChange(null)}>
 											View All Posts
 										</Button>
 										<a href="/courses/{courseId}/ask">
@@ -1325,8 +1389,9 @@
 																: 'secondary'}
 														class="flex h-6 items-center gap-1"
 													>
-														<span class="text-xs" innerHTML={getPostTypeIcon(post.post_type)}
-														></span>
+														<span class="text-xs">
+															{@html getPostTypeIcon(post.post_type)}
+														</span>
 														<span class="text-xs capitalize">{post.post_type}</span>
 													</Badge>
 
@@ -1335,8 +1400,7 @@
 														<div
 															class={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${statusBadge.color}`}
 														>
-															<span innerHTML={statusBadge.icon}></span>
-															<span>{post.status}</span>
+															<span>{@html statusBadge.icon}</span> <span>{post.status}</span>
 														</div>
 													{/if}
 												</div>
@@ -1365,11 +1429,11 @@
 															variant="outline"
 															class="pointer-events-auto flex items-center gap-1"
 														>
-															<span
-																innerHTML={getFolderIcon(
+															<span>
+																{@html getFolderIcon(
 																	folders.find((f) => f.id === post.folder_id)?.name || 'Folder'
 																)}
-															></span>
+															</span>
 															<span
 																>{folders.find((f) => f.id === post.folder_id)?.name ||
 																	'Folder'}</span

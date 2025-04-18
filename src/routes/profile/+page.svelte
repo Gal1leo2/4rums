@@ -82,10 +82,7 @@
   
   async function loadUserProfile(): Promise<void> {
     try {
-      if (!$user) {
-        goto('/auth/login?redirect=/profile');
-        return;
-      }
+
       
       // Load user profile
       const { data: profileData, error: profileError } = await supabase
