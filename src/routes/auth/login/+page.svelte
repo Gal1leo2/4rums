@@ -268,7 +268,7 @@
 						</div>
 						<div class="flex justify-end">
 							<a
-								href="/auth/reset-password"
+								href="https://forms.gle/jgKGDMrM6DeaQ6ss6"
 								class="text-sm text-primary font-medium hover:text-primary/80 hover:underline"
 							>
 								Forgot password?
