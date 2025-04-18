@@ -60,6 +60,7 @@
 		"dompurify": "^3.2.5",
 		"highlight.js": "^11.11.1",
 		"lucide-svelte": "^0.487.0",
-		"marked": "^15.0.8"
+		"marked": "^15.0.8",
+		"marked-highlight": "^2.2.1"
 	}
 }
