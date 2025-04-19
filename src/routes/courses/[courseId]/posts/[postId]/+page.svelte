@@ -27,6 +27,9 @@
 	import hljs from 'highlight.js/lib/common'; // Import highlight.js styles in your +layout.svelte or here (if not globally imported)
 	import 'highlight.js/styles/atom-one-light.css';
 	import { markedHighlight } from 'marked-highlight';
+	import { SmilePlus } from 'lucide-svelte';
+	import {SquareScissors} from 'lucide-svelte'; // Import icons from lucide-svelte
+	import {Send} from 'lucide-svelte';
 
 	// Configure marked with syntax highlighting
 
@@ -1276,39 +1279,10 @@
 										}}
 									>
 										{#if response.is_endorsed}
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												width="16"
-												height="16"
-												viewBox="0 0 24 24"
-												fill="none"
-												stroke="currentColor"
-												stroke-width="2"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												class="mr-1"
-											>
-												<path d="m9 11-5 5 1.5 1.5L10 13"></path>
-												<path d="m19 7-8.5 8.5L7 12"></path>
-											</svg>
+										<SquareScissors />
 											Remove Endorsement
 										{:else}
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												width="16"
-												height="16"
-												viewBox="0 0 24 24"
-												fill="none"
-												stroke="currentColor"
-												stroke-width="2"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-												class="mr-1"
-											>
-												<path d="M7 11v 8h8"></path>
-												<path d="m4 13 3-3 3 3"></path>
-												<path d="M14 6v6h4l-5 5"></path>
-											</svg>
+										<SmilePlus />
 											Endorse
 										{/if}
 									</Button>
@@ -1518,22 +1492,7 @@
 							</svg>
 							<span>Posting...</span>
 						{:else}
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								width="16"
-								height="16"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							>
-								<path
-									d="M22 3a14.05 14.05 0 0 1-2.8 4.2c-2 2-5.3 2.8-7.2 3V7H9v3.2c-1.9-.2-5.2-1-7.2-3A14.05 14.05 0 0 1-.033 3"
-								></path>
-								<path d="M16 10v10M12 22l4-4 4 4M8 10v10M8 18l-4 4-4-4"></path>
-							</svg>
+						<Send />
 							<span>Post Response</span>
 						{/if}
 					</Button>
