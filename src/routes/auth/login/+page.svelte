@@ -81,7 +81,6 @@
 			error = result.error || 'Google login failed';
 			googleLoading = false;
 		}
-		// No need to redirect here - OAuth flow will handle it
 	}
 
 	function togglePasswordVisibility() {
