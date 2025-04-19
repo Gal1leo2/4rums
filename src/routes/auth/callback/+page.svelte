@@ -3,25 +3,12 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { supabase } from '$lib/supabase/client';
-	import { goto } from '$app/navigation';
 
 	let message = 'Completing sign in...';
 	let loading = true;
 
 	onMount(async () => {
 		const redirectTo = $page.url.searchParams.get('redirectTo') || '/courses';
-		
-		// Check for error in URL hash (Supabase puts errors in the hash fragment)
-		const hashParams = new URLSearchParams(window.location.hash.substring(1));
-		const hashError = hashParams.get('error');
-		const hashErrorDescription = hashParams.get('error_description');
-		
-		if (hashError) {
-			// For hash errors, redirect to login with error info
-			const errorMessage = hashErrorDescription?.replace(/\+/g, ' ') || 'Authentication failed';
-			window.location.href = `/auth/login?error=${encodeURIComponent(errorMessage)}`;
-			return;
-		}
 
 		// Give Supabase a moment to process authentication
 		setTimeout(async () => {
