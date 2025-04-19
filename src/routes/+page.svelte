@@ -20,6 +20,9 @@
         <span class="inline-block bg-primary/20 text-primary px-4 py-1 rounded-full text-sm font-medium mb-4">
           Beta Version
         </span>
+        <span class="inline-block bg-primary/20 text-primary px-4 py-1 rounded-full text-sm font-medium mb-4">
+          Soft Opening (19/4/2025) [Now, it's not support a attachment]
+        </span>
       </div>
       
       <h1 class="text-5xl font-bold tracking-tight sm:text-6xl mb-6 bg-gradient-to-r from-primary to-purple-500 text-transparent bg-clip-text">
