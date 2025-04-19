@@ -39,11 +39,6 @@
       await supabase.auth.signOut();
       goto('/auth/login');
     }
-  
-    function goToRequestForm() {
-      countdownActive = false; // Stop the countdown
-      goto('/auth/request-access');
-    }
   </script>
   
   <div class="flex min-h-screen items-center justify-center px-4 py-12">
@@ -67,7 +62,7 @@
           <AlertDescription>
             {#if authUser}
               <p>Your account with email <strong>{authUser.email}</strong> is not authorized to access this system.</p>
-              <p class="mt-2">You need to request access and be approved by an administrator before you can use the system.</p>
+              <p class="mt-2">You need to request access and be approved by an developer before you can use the system.</p>
             {:else}
               <p>You need to be properly registered in the system to access this content.</p>
             {/if}
@@ -76,13 +71,13 @@
         
         <div class="text-center text-sm text-muted-foreground">
           <p>You will be signed out in <span class="font-medium">{countdown}</span> seconds</p>
-          <p class="mt-1">Contact your administrator to request access to the system</p>
+          <p class="mt-1">Contact your Handsome guy to request access to the system</p>
         </div>
       </CardContent>
       
       <CardFooter class="flex flex-col space-y-3">
-        <Button variant="default" class="w-full" onclick={() => window.location.href = 'mailto:admin@example.com?subject=Access Request for ' + (authUser?.email || 'User')}>
-          Contact Administrator
+        <Button variant="default" class="w-full" onclick={() => window.location.href = 'mailto:66050977@kmitl.ac.th?subject=Access Request for ' + (authUser?.email || 'User')}>
+          Contact Handsome guy
         </Button>
         <Button variant="outline" class="w-full" onclick={signOut}>
           Sign Out Now
