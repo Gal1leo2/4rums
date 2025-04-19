@@ -357,12 +357,12 @@
 					<div class="flex flex-col gap-2">
 						<div class="flex items-center space-x-2">
 							<Checkbox id="anonymous" bind:checked={isAnonymous} />
-							<Label for="anonymous">Post anonymously</Label>
+							<Label for="anonymous">Post anonymously [opt-out for student, opt-in for ta/instructor]</Label>
 						</div>
 
 						<div class="flex items-center space-x-2">
 							<Checkbox id="private" bind:checked={isPrivate} />
-							<Label for="private">Make private (only visible to instructors/TAs)</Label>
+							<Label for="private">Make private (only visible to instructors/TAs) [อยู่ระหว่างการซ่อมแซมครับ ยังไม่เปิดใช้]</Label>
 						</div>
 					</div>
 				</form>

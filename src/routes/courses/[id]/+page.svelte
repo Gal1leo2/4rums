@@ -254,8 +254,6 @@
 			useraff = userAffData.affiliation;
 			console.log('User affiliation:', useraff);
 		}
-
-		// Load posts data
 		await loadCourseAndPosts();
 	});
 	async function searchPosts(): Promise<void> {
@@ -637,7 +635,9 @@
 										<path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
 										<path d="M12 17h.01"></path>
 									</svg>
-									<span>Ask Question</span>
+									<span
+										>Ask Question (3ปุ่มนี้กดไปเถอะ เหมือนกันหมด กำลังซ่อม ไปเลือกในหน้าต่อไปเอาจ้า)</span
+									>
 								</a>
 							</DropdownMenu.Item>
 							{#if userRole === 'instructor' || userRole === 'ta'}
@@ -813,9 +813,15 @@
 								</svg>
 								<span>All Posts</span>
 							</div>
-							<Badge variant="outline" class="ml-auto">{allPosts.length}</Badge>
+							<Badge
+								variant="outline"
+								class={`ml-auto ${currentTab === 'all' && !currentFolder ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted'}`}
+							>
+								{allPosts.length}
+							</Badge>
 						</button>
 
+						<!-- Questions Button -->
 						<button
 							type="button"
 							class={`flex h-9 w-full items-center justify-between rounded-md px-3 py-1.5 text-sm transition-colors ${
@@ -847,9 +853,15 @@
 								</svg>
 								<span>Questions</span>
 							</div>
-							<Badge variant="outline" class="ml-auto">{questionPosts.length}</Badge>
+							<Badge
+								variant="outline"
+								class={`ml-auto ${currentTab === 'questions' && !currentFolder ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted'}`}
+							>
+								{questionPosts.length}
+							</Badge>
 						</button>
 
+						<!-- Announcements Button -->
 						<button
 							type="button"
 							class={`flex h-9 w-full items-center justify-between rounded-md px-3 py-1.5 text-sm transition-colors ${
@@ -883,7 +895,12 @@
 								</svg>
 								<span>Announcements</span>
 							</div>
-							<Badge variant="outline" class="ml-auto">{announcementPosts.length}</Badge>
+							<Badge
+								variant="outline"
+								class={`ml-auto ${currentTab === 'announcements' && !currentFolder ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted'}`}
+							>
+								{announcementPosts.length}
+							</Badge>
 						</button>
 
 						<button
@@ -919,7 +936,12 @@
 								</svg>
 								<span>Notes</span>
 							</div>
-							<Badge variant="outline" class="ml-auto">{notePosts.length}</Badge>
+							<Badge
+								variant="outline"
+								class={`ml-auto ${currentTab === 'notes' && !currentFolder ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted'}`}
+							>
+								{notePosts.length}
+							</Badge>
 						</button>
 					</CardContent>
 				</Card>
@@ -965,7 +987,7 @@
 											<Badge
 												variant="outline"
 												class={currentFolder === folder.id
-													? 'bg-primary-foreground/20 hover:bg-primary-foreground/30'
+													? 'bg-primary-foreground/20 text-primary-foreground hover:bg-primary-foreground/30'
 													: ''}
 											>
 												{countPostsInFolder(folder.id)}
@@ -1149,33 +1171,32 @@
 							</CardTitle>
 
 							{#if searchQuery}
-								<Badge variant="secondary" class="flex gap-1 px-3 py-1">
-									<form on:submit|preventDefault={handleSearch}>
-										<span>Search: {searchQuery}</span>
-										<button
-											class="opacity-70 hover:opacity-100"
-											type="button"
-											on:click={() => {
-												searchQuery = '';
-												setCurrentView(currentTab, currentFolder);
-											}}
+								<Badge variant="secondary" class="flex items-center gap-1 px-3 py-1">
+									<span>Search: {searchQuery}</span>
+									<button
+										class="ml-1 opacity-70 hover:opacity-100"
+										type="button"
+										aria-label="Clear search"
+										on:click={() => {
+											searchQuery = '';
+											setCurrentView(currentTab, currentFolder);
+										}}
+									>
+										<svg
+											xmlns="http://www.w3.org/2000/svg"
+											width="14"
+											height="14"
+											viewBox="0 0 24 24"
+											fill="none"
+											stroke="currentColor"
+											stroke-width="2"
+											stroke-linecap="round"
+											stroke-linejoin="round"
 										>
-											<svg
-												xmlns="http://www.w3.org/2000/svg"
-												width="14"
-												height="14"
-												viewBox="0 0 24 24"
-												fill="none"
-												stroke="currentColor"
-												stroke-width="2"
-												stroke-linecap="round"
-												stroke-linejoin="round"
-											>
-												<path d="M18 6 6 18"></path>
-												<path d="m6 6 12 12"></path>
-											</svg>
-										</button>
-									</form>
+											<path d="M18 6 6 18"></path>
+											<path d="m6 6 12 12"></path>
+										</svg>
+									</button>
 								</Badge>
 							{/if}
 						</div>
